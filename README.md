@@ -64,7 +64,7 @@ pnpm dev                    # 待补：以根 package.json scripts 为准
 | `mianyoubiaoqing` | 开发 | M1 多模态记账；游戏化、异常消费审计（暂领） | [mianyoubiaoqing.md](docs/agent-logs/mianyoubiaoqing.md) |
 | `yukacezar569-blip` | 开发 | M1 多模态记账；M3 自然语言查账；答辩 PPT | [yukacezar569-blip.md](docs/agent-logs/yukacezar569-blip.md) |
 | `Z_Wen` | 开发 | M2 分类入库与统计（主做分类算法）；M4 预算提醒 | [Z_Wen.md](docs/agent-logs/Z_Wen.md) |
-| `member-e`（待替换） | 开发 | M2 分类入库与统计；M4 预算提醒 | [member-e.md](docs/agent-logs/member-e.md) |
+| `huangsiting546` | 开发 | M2 分类入库与统计；M4 预算提醒 | [huangsiting546.md](docs/agent-logs/huangsiting546.md) |
 
 M2 与 M4 同进程、由同一组负责；`docs/contracts/` 由该组维护。
 
