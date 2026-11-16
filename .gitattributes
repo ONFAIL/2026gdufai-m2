@@ -1,0 +1,12 @@
+# 统一以 LF 存入仓库，避免 Windows / macOS 协作者之间的换行冲突
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.mp3 binary
+*.wav binary
+*.m4a binary
+*.db binary
+*.sqlite binary
