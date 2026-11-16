@@ -28,7 +28,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AppError) {
       void reply.status(error.statusCode).send({
-        error: { code: error.code, message: error.message, field: error.field }
+        error: {
+          code: error.code,
+          message: error.message,
+          field: error.field,
+          ...(error.details === undefined ? {} : { details: error.details })
+        }
       });
       return;
     }

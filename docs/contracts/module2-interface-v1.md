@@ -1,7 +1,7 @@
 # 模块 2 接口交接文档
 
 > 适用对象：模块 1（语音/文字/图片记账）、模块 3（自然语言查账）、模块 4（预算提醒，同进程）
-> 文档版本：v1.0（接口冻结）
+> 文档版本：v1.1（新增 `INTERNAL_ERROR` 与错误响应可选 `details` 字段）
 > 维护人：模块 2 负责人
 > 状态：接口定义已冻结；服务端实现按本文档开发中，联调前以本文档为准
 
@@ -275,6 +275,14 @@
 | `CATEGORY_NOT_FOUND` | 404 | 类别不存在 |
 | `CATEGORY_IN_USE` | 409 | 删除有数据的类别，返回 `counts` |
 | `UNAUTHORIZED` | 401 | 缺少/错误的鉴权头 |
+| `INTERNAL_ERROR` | 500 | 未捕获异常，返回通用错误信息 |
+
+> 错误响应可选携带 `details` 字段承载结构化附加信息，例如 `CATEGORY_IN_USE` 的 `counts`：
+>
+> ```jsonc
+> { "error": { "code": "CATEGORY_IN_USE", "message": "该类别下还有 12 笔账单", "field": "categoryId",
+>              "details": { "counts": { "transactions": 12, "budgets": 1 } } } }
+> ```
 
 ---
 

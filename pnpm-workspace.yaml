@@ -2,8 +2,9 @@ packages:
   - backend
   - frontend
 
-# pnpm 10 起默认拦截依赖的安装脚本；esbuild 需要它下载平台二进制
+# pnpm 12 通过 allowBuilds 授权依赖的安装脚本；esbuild 需要它下载平台二进制。
+# 旧版 pnpm 仍识别 onlyBuiltDependencies，两者同时保留以兼容不同 pnpm 版本。
 onlyBuiltDependencies:
   - esbuild
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true
