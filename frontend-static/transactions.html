@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>记一笔 · 账单</title>
+  <link rel="stylesheet" href="assets/css/tokens.css">
+  <link rel="stylesheet" href="assets/css/components.css">
+  <link rel="stylesheet" href="assets/css/pages.css">
+</head>
+<body>
+  <div id="nav-root"></div>
+
+  <main class="app-main">
+    <header class="page-head">
+      <div>
+        <h1 class="page-title">账单一览</h1>
+        <p class="page-desc">游标翻页（cursor / nextCursor），一次 8 条；筛类别会重置分页。</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="list-toolbar">
+        <label class="field-label" for="cat-filter">类别筛选</label>
+        <select class="select" id="cat-filter"></select>
+        <span class="card-sub" id="list-summary"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">时间</th>
+              <th scope="col">商户</th>
+              <th scope="col">类别</th>
+              <th scope="col">方向</th>
+              <th scope="col" class="num">金额</th>
+            </tr>
+          </thead>
+          <tbody id="list-body"></tbody>
+        </table>
+      </div>
+
+      <div id="list-empty"></div>
+
+      <div class="list-foot">
+        <span id="list-foot"></span>
+        <button class="btn btn-sm" id="load-more" type="button">加载更多</button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="assets/js/pages/transactions.js"></script>
+</body>
+</html>

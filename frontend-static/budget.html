@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>记一笔 · 预算</title>
+  <link rel="stylesheet" href="assets/css/tokens.css">
+  <link rel="stylesheet" href="assets/css/components.css">
+  <link rel="stylesheet" href="assets/css/pages.css">
+</head>
+<body>
+  <div id="nav-root"></div>
+
+  <main class="app-main">
+    <header class="page-head">
+      <div>
+        <h1 class="page-title">预算与提醒</h1>
+        <p class="page-desc">80% 进入「接近上限」，100% 判「已超支」并弹提醒。</p>
+      </div>
+    </header>
+
+    <div id="hero"></div>
+
+    <section class="card" style="margin-top: var(--space-4)">
+      <div class="card-head">
+        <h2 class="card-title">分类预算</h2>
+        <span class="card-sub">来源：<code>/api/budgets?month=</code></span>
+      </div>
+      <div class="budget-list" id="budget-list"></div>
+    </section>
+
+    <section class="card card-pad" style="margin-top: var(--space-4)">
+      <h2 class="card-title">预算写入暂未开放</h2>
+      <p class="page-desc">
+        契约 §2.5 只定义了 <code>GET /api/budgets</code>，没有写入接口，所以这页目前是只读的。
+        需要改预算，得先由 M4 在契约里补一个 <code>PUT /api/budgets</code>，走 <code>contract-change</code> 流程。
+      </p>
+    </section>
+  </main>
+
+  <script type="module" src="assets/js/pages/budget.js"></script>
+</body>
+</html>

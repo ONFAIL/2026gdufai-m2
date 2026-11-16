@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>记一笔 · 记账</title>
+  <link rel="stylesheet" href="assets/css/tokens.css">
+  <link rel="stylesheet" href="assets/css/components.css">
+  <link rel="stylesheet" href="assets/css/pages.css">
+</head>
+<body>
+  <div id="nav-root"></div>
+
+  <main class="app-main">
+    <header class="page-head">
+      <div>
+        <h1 class="page-title">记一笔</h1>
+        <p class="page-desc">说一句话、发一段语音或一张小票。抽不准会追问，补全后才入库。</p>
+      </div>
+    </header>
+
+    <div class="capture-grid">
+      <section class="card chat-card" aria-label="对话区">
+        <div class="chat-log" id="chat-log" role="log" aria-live="polite"></div>
+
+        <form class="chat-input" id="composer">
+          <div class="chat-tools" id="sample-row"></div>
+
+          <label class="sr-only" for="file-input">上传小票图片</label>
+          <div class="chat-tools">
+            <input class="sr-only" id="file-input" type="file" accept="image/*">
+            <label class="file-btn" for="file-input">图片小票</label>
+            <button class="btn btn-ghost btn-sm" id="voice-btn" type="button">语音</button>
+          </div>
+
+          <div class="chat-row">
+            <label class="sr-only" for="chat-input">输入记账内容</label>
+            <textarea class="textarea" id="chat-input" rows="1" placeholder="例如：早上瑞幸花了32块5"></textarea>
+            <button class="btn btn-primary" id="send-btn" type="submit">发送</button>
+          </div>
+        </form>
+      </section>
+
+      <aside class="card panel-card" aria-label="识别结果">
+        <div class="card-head">
+          <h2 class="card-title">识别结果</h2>
+          <span class="card-sub">确认后才入库</span>
+        </div>
+        <div class="panel-body" id="panel-body">
+          <p class="panel-empty">左侧发一句话，这里会出现抽取结果或追问表单。</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <script type="module" src="assets/js/pages/capture.js"></script>
+</body>
+</html>

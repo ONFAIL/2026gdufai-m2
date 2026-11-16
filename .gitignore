@@ -35,3 +35,6 @@ Thumbs.db
 # 代理本地文件
 CLAUDE.local.md
 .claude/settings.local.json
+
+# 本地交付快照（不进版本库）
+*.zip

@@ -1,0 +1,61 @@
+/* tokens.css —— 设计变量唯一来源。任何页面与组件不得写死颜色、间距、字号。 */
+:root {
+  /* 色彩 */
+  --c-bg: #f5f5f3;
+  --c-surface: #ffffff;
+  --c-surface-2: #fafaf9;
+  --c-line: #e7e5e4;
+  --c-line-strong: #d6d3d1;
+  --c-text: #1c1917;
+  --c-text-2: #44403c;
+  --c-muted: #78716c;
+  --c-brand: #b45309;
+  --c-brand-weak: #fef3c7;
+  --c-brand-line: #fcd34d;
+  --c-ok: #15803d;
+  --c-ok-weak: #dcfce7;
+  --c-warn: #b45309;
+  --c-warn-weak: #fef3c7;
+  --c-danger: #b91c1c;
+  --c-danger-weak: #fee2e2;
+  --c-info: #1d4ed8;
+  --c-info-weak: #dbeafe;
+
+  /* 间距：主刻度按 4px 栅格递增 */
+  --space-hair: 1px;
+  --space-0: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 72px;
+
+  /* 字号 */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 16px;
+  --fs-lg: 20px;
+  --fs-xl: 26px;
+  --fs-2xl: 34px;
+
+  /* 圆角与阴影 */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(28, 25, 23, 0.06), 0 1px 3px rgba(28, 25, 23, 0.04);
+  --shadow-2: 0 6px 24px rgba(28, 25, 23, 0.08);
+
+  /* 布局 */
+  --nav-h: 56px;
+  --content-max: 1160px;
+
+  /* 字体 */
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --font-num: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+}

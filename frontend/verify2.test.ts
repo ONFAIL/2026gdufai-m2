@@ -1,0 +1,95 @@
+import { describe, it, expect } from 'vitest';
+import { mockImportBatch } from './src/mock/import';
+import { mockGetStats } from './src/mock/stats';
+import { mockListTransactions, mockGetBudgets, mockGetCategories } from './src/mock/db';
+import type { ImportRecord, FeedbackCode } from './src/types/contract';
+
+const base = {
+  userId: 'u_demo', amount: 30, merchant: null,
+  chatAt: '2026-11-16T20:00:00+08:00', rawText: '午饭 30 元',
+  modality: 'text' as const, sourceRef: null, confidence: 0.9,
+};
+function rec(id: string, key: string, patch: Partial<ImportRecord> = {}): ImportRecord {
+  return { ...base, recordId: id, idempotencyKey: key, direction: 'expense', occurredAt: '2026-11-16T12:00:00+08:00', ...patch };
+}
+const batch = (id: string, key: string, patch: Partial<ImportRecord> = {}) => ({
+  version: 1 as const, batchId: 'b-' + id, sentAt: '2026-11-16T20:00:00+08:00', records: [rec(id, key, patch)],
+});
+
+describe('B1 反馈码对齐契约', () => {
+  it('反馈码集合', async () => {
+    const contractCodes = ['MISSING_AMOUNT','MISSING_TIME','FUTURE_TIME','MISSING_DIRECTION','CATEGORY_KIND_MISMATCH','LOW_CONFIDENCE_CATEGORY','MERCHANT_DEFAULTED','TIME_DEFAULTED_TO_CHAT_TIME','DIRECTION_FORCED_BY_CATEGORY','DUPLICATE_RECORD','REFUND_NOT_SUPPORTED'];
+    const { feedbackText } = await import('./src/types/contract');
+    const keys = Object.keys(feedbackText).sort();
+    console.log('B1 反馈码数量=', keys.length, '| 与契约集合全等=', JSON.stringify(keys) === JSON.stringify([...contractCodes].sort()));
+    for (const c of contractCodes) if (!keys.includes(c)) console.log('  缺失:', c);
+  });
+});
+
+describe('B2 统计/账单/预算结构', () => {
+  it('统计字段形状', () => {
+    const s = mockGetStats({ dimension: 'recent7' });
+    console.log('STATS range=', JSON.stringify(s.range));
+    console.log('STATS summary keys=', Object.keys(s.summary).join(','));
+    console.log('STATS summary=', JSON.stringify(s.summary));
+    console.log('STATS bucket keys=', Object.keys(s.buckets[0]).join(','));
+    console.log('STATS categories[0]=', JSON.stringify(s.buckets.find(b => b.categories.length)?.categories[0]));
+    console.log('STATS meta=', JSON.stringify(s.meta));
+    expect('start' in s.range && 'end' in s.range).toBe(true);
+    expect('netCents' in s.summary).toBe(true);
+    expect('period' in s.buckets[0]).toBe(true);
+    expect(s.meta.unit).toBe('cent');
+  });
+  it('账单 filter 字段', () => {
+    const r = mockListTransactions({ categoryId: 1, from: '2026-11-01', to: '2026-11-30' });
+    console.log('TX filter=', JSON.stringify(r.filter));
+    console.log('TX item keys=', Object.keys(r.items[0]).join(','));
+    console.log('TX filter 条数=', r.items.length);
+  });
+  it('预算字段', () => {
+    const list = mockGetBudgets('2026-11');
+    console.log('BUDGET[0]=', JSON.stringify(list[0]));
+  });
+});
+
+describe('B3 入站类型', () => {
+  it('direction=null 触发 MISSING_DIRECTION，version 为数字', async () => {
+    const r = (await mockImportBatch(batch('x1', 'k-null-dir', { direction: null }))).results[0];
+    console.log('B3 null方向=', r.status, JSON.stringify(r.feedback.map(f => f.code)));
+    expect(r.feedback.some(f => f.code === 'MISSING_DIRECTION')).toBe(true);
+  });
+  it('duplicate 反馈码为 DUPLICATE_RECORD', async () => {
+    const r1 = (await mockImportBatch(batch('d1', 'k-dup'))).results[0];
+    const r2 = (await mockImportBatch(batch('d2', 'k-dup'))).results[0];
+    console.log('B3 duplicate=', r2.status, r2.transactionId === r1.transactionId, JSON.stringify(r2.feedback));
+    expect(r2.feedback[0].code).toBe('DUPLICATE_RECORD');
+  });
+});
+
+describe('B4 色值', () => {
+  it('11 个色值逐字对齐契约', () => {
+    const contract = ['#F97316','#3B82F6','#EC4899','#10B981','#8B5CF6','#EF4444','#F59E0B','#6B7280','#22C55E','#F472B6','#9CA3AF'];
+    const cats = mockGetCategories();
+    const actual = cats.map(c => c.color);
+    console.log('B4 色值全等=', JSON.stringify(actual) === JSON.stringify(contract));
+    actual.forEach((c, i) => { if (c !== contract[i]) console.log('  错位 ID', i + 1, '期望', contract[i], '实际', c); });
+    console.log('B4 isPreset/isActive 都有=', cats.every(c => 'isPreset' in c && 'isActive' in c));
+  });
+});
+
+describe('N5-N8', () => {
+  it('N5 第4轮不复活', async () => {
+    for (let i = 1; i <= 5; i++) {
+      const r = (await mockImportBatch(batch('f' + i, 'k-follow', { amount: null }))).results[0];
+      console.log('N5 轮', i, r.status, JSON.stringify(r.feedback.map(f => f.code)));
+    }
+  });
+  it('N5 退款分支', async () => {
+    const r = (await mockImportBatch(batch('r1', 'k-refund', { rawText: '退款 30 元' }))).results[0];
+    console.log('N5 退款=', r.status, JSON.stringify(r.feedback));
+  });
+  it('N8 收入类别推断（工资）', async () => {
+    const r = (await mockImportBatch(batch('i1', 'k-income', { direction: 'income' }))).results[0];
+    console.log('N8 收入类别=', JSON.stringify(r.category));
+  });
+});

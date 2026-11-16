@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>记一笔 · 统计</title>
+  <link rel="stylesheet" href="assets/css/tokens.css">
+  <link rel="stylesheet" href="assets/css/components.css">
+  <link rel="stylesheet" href="assets/css/pages.css">
+</head>
+<body>
+  <div id="nav-root"></div>
+
+  <main class="app-main">
+    <header class="page-head">
+      <div>
+        <h1 class="page-title">统计报表</h1>
+        <p class="page-desc">所有数字都直接来自 <code>/api/stats</code>，页面不做求和。</p>
+      </div>
+      <div class="tabs" role="tablist" aria-label="统计维度">
+        <button class="tab is-active" type="button" data-dimension="recent7" role="tab" aria-selected="true">近 7 日</button>
+        <button class="tab" type="button" data-dimension="month" role="tab" aria-selected="false">本月</button>
+      </div>
+    </header>
+
+    <div class="kpi-grid" id="kpi-grid"></div>
+
+    <div class="chart-grid">
+      <section class="card">
+        <div class="card-head">
+          <h2 class="card-title">支出走势</h2>
+          <span class="card-sub" id="top-line"></span>
+        </div>
+        <div class="chart" id="chart"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2 class="card-title">类别占比</h2>
+          <span class="card-sub">按支出合计</span>
+        </div>
+        <div class="ratio-list" id="ratio-list"></div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="assets/js/pages/stats.js"></script>
+</body>
+</html>
