@@ -40,3 +40,22 @@
 - **验证**：`pnpm install` 成功（241 包）；`pnpm -r typecheck`、`pnpm -r lint`、`pnpm -r test` 全绿（backend 13 例、frontend 31 例）
 - **人工审核**：采纳
 - **遗留问题**：契约 v1 缺类别 CRUD、预算写入、账单作废与 `INTERNAL_ERROR`，需走 contract-change；导入链路与统计接口尚未实现
+
+### LOG-Z_Wen-20261117-02
+
+- **时间**：2026-11-17 00:25（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `fix/m2-skeleton-p0p1` / 待建
+- **任务**：按独立审议意见修正 PR #3 的 1 个 P0 + 2 个 P1，属定点修订
+- **关键提示词**：只改 `pnpm-workspace.yaml`、`app.ts`、`errors.ts`（另加契约 §2.6），禁止重写或重构其它已核对的代码
+- **代理做了什么**：
+  - `pnpm-workspace.yaml`：删除未填写的 `allowBuilds` 占位符，改为 `allowBuilds: { esbuild: true }`，保留 `onlyBuiltDependencies` 兼容旧版 pnpm
+  - `backend/src/app.ts`：错误处理器透传 `error.details`
+  - `backend/src/shared/errors.ts`：从 `ErrorCode` 移除 `DUPLICATE_RECORD`（它是反馈码，不是 HTTP 错误码）
+  - `docs/contracts/module2-interface-v1.md`：§2.6 登记 `INTERNAL_ERROR`（500），补充 `details` 字段说明，版本升 v1.1
+  - 新增 `test/m2/error-handler.test.ts`：2 例，覆盖 counts 透传与 500 兜底
+- **决策**：`INTERNAL_ERROR` 走契约变更（方案 a），不在代码里用契约外错误码；`details` 仅在存在时输出，避免响应体出现 `details: undefined`
+- **排查记录**：只删占位符后全新目录安装仍报 `ERR_PNPM_IGNORED_BUILDS`，确认 pnpm 12 依据 `allowBuilds` 授权构建脚本，`onlyBuiltDependencies` 在 v12 已不生效
+- **验证**：复制仓库到全新目录 `D:\m2-fix-verify`（排除 node_modules/.git），`pnpm install --frozen-lockfile` 首次 exit 0，esbuild 两个版本 postinstall 均执行；该目录内 `pnpm -r typecheck/lint/test` 全绿（backend 15 例、frontend 31 例）
+- **人工审核**：采纳
+- **遗留问题**：契约变更 issue 待开；CI workflow（用户提供 `ci.yml`）建议单独 PR 提交
