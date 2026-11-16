@@ -1,0 +1,16 @@
+{
+  "name": "2026gdufai",
+  "private": true,
+  "packageManager": "pnpm@12.21.0",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @gduf/backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "start": "pnpm --filter @gduf/backend start",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test"
+  }
+}
