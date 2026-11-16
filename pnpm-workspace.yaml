@@ -1,0 +1,9 @@
+packages:
+  - backend
+  - frontend
+
+# pnpm 10 起默认拦截依赖的安装脚本；esbuild 需要它下载平台二进制
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: set this to true or false
