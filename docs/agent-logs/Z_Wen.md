@@ -60,6 +60,27 @@
 - **人工审核**：采纳
 - **遗留问题**：契约变更 issue 待开；CI workflow（用户提供 `ci.yml`）建议单独 PR 提交
 
+### LOG-Z_Wen-20261117-03
+
+- **时间**：2026-11-17 20:30（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-import-pipeline` / 待建
+- **任务**：实现导入链路：批次校验、规则分类、追问状态机、入库与 `POST /api/transactions/import`
+- **关键提示词**：「完成 M2 剩下的部分」；按契约 §1 与 §4 联调清单实现
+- **代理做了什么**：
+  - `modules/ledger/{types,validation,classifier,repository,intent,intake,routes}.ts`
+  - `app.ts` 注册 ledger 路由
+  - 测试：validation 13、classifier 7、intent 2、import 10（契约 §4 八条联调用例全覆盖）
+- **决策**：
+  - 分类先按全类别匹配再判冲突，避免「方向过滤」让冲突永远检测不到
+  - 追问上限按「第 3 次提交转 rejected」实现（前端 mock 同口径），rejected 后不再复活
+  - 时间回退取 `chatAt ?? batch.sentAt`，并写 `time_source=chat_time`
+  - 用户表按入站 `userId` 自动补建，保证 `transactions.user_id` 外键成立
+- **验证**：`pnpm --filter @gduf/backend typecheck / lint / test` 全绿，47 个用例通过
+- **排查记录**：`intake.ts` 的 `existing.codes.map` 触发 `TS2345`（string 不能赋给 FeedbackCode），加类型断言修复
+- **人工审核**：采纳
+- **遗留问题**：统计、账单一览、类别字典接口未实现；预算提醒属 M4
+
 ### LOG-Z_Wen-20261117-06
 
 - **时间**：2026-11-17 21:55（+08:00）
@@ -146,3 +167,4 @@
 - **验证**：`git diff --check` 通过；§2.7 三条计数规则与删除/迁移语义逐条核对
 - **人工审核**：reviewer 要求收口，待复审
 - **遗留问题**：无
+

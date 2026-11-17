@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { AppConfig } from './config/index.ts';
 import type { Db } from './db/client.ts';
+import { registerLedgerRoutes } from './modules/ledger/routes.ts';
 import { AppError } from './shared/errors.ts';
 
 export interface AppDeps {
@@ -24,6 +25,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.decorate('db', deps.db);
+
+  void app.register(registerLedgerRoutes);
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AppError) {
