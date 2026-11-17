@@ -1,7 +1,7 @@
 # 模块 2 接口交接文档
 
 > 适用对象：模块 1（语音/文字/图片记账）、模块 3（自然语言查账）、模块 4（预算提醒，同进程）
-> 文档版本：v1.1（新增 `INTERNAL_ERROR` 与错误响应可选 `details` 字段）
+> 文档版本：v1.2（新增用户与鉴权约定、类别管理/预算写入/账单纠错接口、贷款类别）
 > 维护人：模块 2 负责人
 > 状态：接口定义已冻结；服务端实现按本文档开发中，联调前以本文档为准
 
@@ -17,6 +17,15 @@
 | 模块 4 | 预算 CRUD、超支判断、通知 | 账单入库、统计口径 |
 
 一句话：**模块 1 只给字段，模块 2 只给事实，模块 3 只负责说人话。**
+
+## 0.1 用户与鉴权（v1.2 新增）
+
+- 本期为**单用户演示**：服务端使用固定用户 `DEMO_USER_ID`（环境变量，默认 `u_001`）。
+- 入站记录的 `userId` 必须等于 `DEMO_USER_ID`，否则整批返回 `INVALID_BATCH`（`field: records[i].userId`）。
+- 读接口（统计、账单一览）不接受 `userId` 参数，统一读取 `DEMO_USER_ID`。
+- 鉴权：`APP_AUTH_TOKEN` 非空时，所有 `/api/*` 请求必须携带 `Authorization: Bearer <token>`，缺失或不匹配返回 `UNAUTHORIZED`；为空时按开发模式放行。
+- 用户数据只存 `users(id, nickname, timezone, currency, created_at)`；`nickname` 默认等于 `userId`，**不存密码、邮箱、手机号等个人信息**。
+
 
 ---
 
@@ -272,6 +281,7 @@
 |---|---|---|
 | `INVALID_BATCH` | 400 | 批次缺必填字段 |
 | `INVALID_DIMENSION_PARAM` | 422 | dimension 与参数不匹配 |
+| `INVALID_QUERY_PARAM` | 422 | 查询参数非法（分页、筛选、游标等） |
 | `CATEGORY_NOT_FOUND` | 404 | 类别不存在 |
 | `CATEGORY_IN_USE` | 409 | 删除有数据的类别，返回 `counts` |
 | `UNAUTHORIZED` | 401 | 缺少/错误的鉴权头 |
@@ -283,6 +293,75 @@
 > { "error": { "code": "CATEGORY_IN_USE", "message": "该类别下还有 12 笔账单", "field": "categoryId",
 >              "details": { "counts": { "transactions": 12, "budgets": 1 } } } }
 > ```
+
+---
+
+## 2.7 类别管理
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/categories` | 创建自定义类别 |
+| PATCH | `/api/categories/:id` | 改名 / 颜色 / 图标 / 关键词 / 停用 |
+| DELETE | `/api/categories/:id` | 删除自定义类别 |
+| POST | `/api/categories/:id/reassign` | 批量迁移账单与预算到目标类别 |
+
+```jsonc
+// 创建
+POST /api/categories
+{ "name": "宠物", "kind": "expense", "color": "#0EA5E9", "icon": "🐱",
+  "keywords": ["狗粮", "猫粮"], "sortOrder": 20 }
+→ 201 { "id": 12, "name": "宠物", "kind": "expense", "color": "#0EA5E9",
+        "icon": "🐱", "isPreset": false, "isActive": true }
+
+// 删除被引用的类别
+DELETE /api/categories/12 → 409
+{ "error": { "code": "CATEGORY_IN_USE", "message": "类别下还有账单", "field": "categoryId",
+             "details": { "counts": { "transactions": 10, "budgets": 1 } } } }
+```
+
+规则：
+
+- 预设类别（`isPreset=true`）只能停用（`isActive=false`），不能删除；
+- 删除前校验 `transactions` 与 `budgets` 引用，有引用返回 `409 CATEGORY_IN_USE` 并给出 `counts`；
+- `POST /reassign` 的 `targetCategoryId` 的 `kind` 必须与账单 `direction` 一致，否则返回 `CATEGORY_KIND_MISMATCH`；
+- 自定义类别与预设类别一样参与自动分类，`kind` 只能为 `expense` / `income`。
+
+## 2.8 预算写入
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| PUT | `/api/budgets` | 新增或修改月度预算（幂等覆盖） |
+| DELETE | `/api/budgets/:id` | 删除预算 |
+
+```jsonc
+PUT /api/budgets
+{ "month": "2026-11", "scope": "category", "categoryId": 1,
+  "amountCents": 100000, "alertThresholds": [80, 100] }
+→ 200 { "scope": "category", "category": { "id": 1, "name": "餐饮" },
+        "amountCents": 100000, "spentCents": 98000, "remainingCents": 2000,
+        "usageRatio": 0.98, "level": "near" }
+```
+
+规则：`scope=total` 时 `categoryId` 必须为 `null`；`scope=category` 必须提供 `categoryId`；同一 `(month, scope, categoryId)` 幂等覆盖，不产生重复预算。
+
+## 2.9 账单纠错
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| PATCH | `/api/transactions/:id` | 修改分类 / 金额 / 商户 / 时间 |
+| POST | `/api/transactions/:id/void` | 软作废（统计与预算排除） |
+
+```jsonc
+PATCH /api/transactions/tx_xxx
+{ "categoryId": 3 }
+→ 200 { "id": "tx_xxx", "direction": "expense", "category": { "id": 3, "name": "购物" } }
+
+POST /api/transactions/tx_xxx/void
+{ "reason": "退款" }
+→ 200 { "id": "tx_xxx", "status": "void" }
+```
+
+副作用约定：改分类时写入 `user_category_rules`（下次同商户自动命中）；改到另一侧 `kind` 时翻转 `direction` 并重算当月预算；作废后该账单从统计与预算中排除，但记录保留。
 
 ---
 
@@ -308,8 +387,9 @@
 | 9 | 工资 | `#22C55E` | 工资、薪资、月薪、发薪、薪酬、奖金、年终奖、绩效、提成、兼职、外快、稿费、劳务 |
 | 10 | 转账 | `#F472B6` | 转账、收款、入账、红包、礼金、压岁钱 |
 | 11 | 其他收入 | `#9CA3AF` | 利息、分红、基金、股票、理财、收益、报销 |
+| 12 | 贷款 | `#0EA5E9` | 贷款、借款、借到、放款、下款、借钱 |
 
-> 口径说明：**转账计入收入**；**退款/退货不算收入**（返回 `REFUND_NOT_SUPPORTED`，引导作废原单）。
+> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/退货不算收入**（返回 `REFUND_NOT_SUPPORTED`，引导作废原单）。
 
 ---
 
@@ -325,6 +405,7 @@
 - [ ] 方向与类别冲突 → 首轮 `CATEGORY_KIND_MISMATCH`，第二轮按类别覆盖
 - [ ] 文本含「退款」→ `REFUND_NOT_SUPPORTED`
 - [ ] 缺 `sentAt` → 整批 `INVALID_BATCH`
+- [ ] 入站 `userId` 与 `DEMO_USER_ID` 不一致 → 整批 `INVALID_BATCH`
 
 模块 3 侧：
 
@@ -338,7 +419,7 @@
 
 ## 5. 变更与沟通约定
 
-1. 本文档对应 `contract v1`，**字段只增不删、语义不变**；破坏性改动会提前在群里通知并升版本号。
+1. 本文档对应 `contract v1.x`（当前 **v1.2**），**字段只增不删、语义不变**；破坏性改动会提前在群里通知并升版本号。
 2. 模块 2 的实现在 `backend/` 下，接口以本文档为准；代码合并后如有差异，以代码为准并同步更新本文档。
 3. 模块 1 / 3 需要新增字段或接口（比如「按商户统计」），先在群里提，确认后由模块 2 加，**不要各自约定后直接改**。
 4. 联调问题优先带三样东西：`batchId` / `recordId` / 接口返回原文，方便直接查 `intake_log`。

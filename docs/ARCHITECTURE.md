@@ -92,7 +92,7 @@ flowchart LR
 - 数据库：SQLite 单文件，容器内路径通过 `DATABASE_PATH` 配置，挂载到卷持久化。
 - 金额：入库为整数分；M1 入站的元在 M2 校验阶段转换，转换只发生这一处。
 - 时间：存 ISO-8601 字符串（带 `+08:00`）并冗余 `occurred_date` 用于统计；统计时区 `Asia/Shanghai`。
-- 预设类别 ID 1–11 固定，由 seed 脚本写入；前端与话术通过 `GET /api/categories` 获取。
+- 预设类别 ID 1–12 固定，由 seed 脚本写入；前端与话术通过 `GET /api/categories` 获取。
 - 上传文件（语音/图片）落盘到 `UPLOAD_DIR`，数据库只存相对路径（`sourceRef`）。
 
 ## 5. 待定事项
@@ -101,7 +101,7 @@ flowchart LR
 |---|---|---|
 | 前端 ↔ 后端的对话入口接口（记账与查账是否共用一个 `/api/chat`） | M1 + M3 + 前端 | 定稿后补契约 v1.x |
 | M4 预算接口完整定义 | M4 | 契约 2.5 仅定义了读取 |
-| 鉴权方式（单用户演示 Token / 简单登录） | M2 + reviewer | 契约中已预留 `UNAUTHORIZED` |
+| 鉴权方式（单用户演示 Token / 简单登录） | M2 + reviewer | **已定**：契约 v1.2 §0.1，单用户 `DEMO_USER_ID` + 可选 `APP_AUTH_TOKEN` |
 | LLM / OCR / ASR 服务商 | M1 + M3 | 定后写 ADR |
 | 通知渠道（邮件 / QQ 机器人） | M4 | — |
 | 游戏化形态（宠物 / 种树） | `mianyoubiaoqing` | 第二周 |
