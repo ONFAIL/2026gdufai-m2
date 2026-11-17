@@ -2,6 +2,7 @@
 
 > 适用对象：模块 1（语音/文字/图片记账）、模块 3（自然语言查账）、模块 4（预算提醒，同进程）
 > 文档版本：v1.2（新增用户与鉴权约定、类别管理/预算写入/账单纠错接口、贷款类别）
+> 冻结依据：contract-change issue #12；本版本仅新增契约，不含实现
 > 维护人：模块 2 负责人
 > 状态：接口定义已冻结；服务端实现按本文档开发中，联调前以本文档为准
 
@@ -265,7 +266,7 @@
 ### 2.5 预算状态 `GET /api/budgets?month=2026-11`（模块 4 提供）
 
 ```jsonc
-[ { "scope": "total", "category": null, "amountCents": 300000,
+[ { "id": 1, "scope": "total", "category": null, "amountCents": 300000,
     "spentCents": 268400, "remainingCents": 31600, "usageRatio": 0.895, "level": "near" } ]
 ```
 
@@ -284,6 +285,9 @@
 | `INVALID_QUERY_PARAM` | 422 | 查询参数非法（分页、筛选、游标等） |
 | `CATEGORY_NOT_FOUND` | 404 | 类别不存在 |
 | `CATEGORY_IN_USE` | 409 | 删除有数据的类别，返回 `counts` |
+| `CATEGORY_KIND_MISMATCH` | 409 | 迁移或修改类别时，目标类别 `kind` 与账单 `direction` 不一致 |
+| `BUDGET_NOT_FOUND` | 404 | 预算不存在 |
+| `BUDGET_CONFLICT` | 409 | 迁移预算时目标类别同月已有预算，`details` 返回冲突双方预算 id |
 | `UNAUTHORIZED` | 401 | 缺少/错误的鉴权头 |
 | `INTERNAL_ERROR` | 500 | 未捕获异常，返回通用错误信息 |
 
@@ -306,24 +310,27 @@
 | POST | `/api/categories/:id/reassign` | 批量迁移账单与预算到目标类别 |
 
 ```jsonc
-// 创建
+// 创建（ID 12 已被「贷款」占用，自定义类别从 13 起自增）
 POST /api/categories
 { "name": "宠物", "kind": "expense", "color": "#0EA5E9", "icon": "🐱",
   "keywords": ["狗粮", "猫粮"], "sortOrder": 20 }
-→ 201 { "id": 12, "name": "宠物", "kind": "expense", "color": "#0EA5E9",
+→ 201 { "id": 13, "name": "宠物", "kind": "expense", "color": "#0EA5E9",
         "icon": "🐱", "isPreset": false, "isActive": true }
 
 // 删除被引用的类别
-DELETE /api/categories/12 → 409
+DELETE /api/categories/13 → 409
 { "error": { "code": "CATEGORY_IN_USE", "message": "类别下还有账单", "field": "categoryId",
-             "details": { "counts": { "transactions": 10, "budgets": 1 } } } }
+             "details": { "counts": { "transactions": 10, "budgets": 1, "rules": 3 } } } }
 ```
 
 规则：
 
 - 预设类别（`isPreset=true`）只能停用（`isActive=false`），不能删除；
-- 删除前校验 `transactions` 与 `budgets` 引用，有引用返回 `409 CATEGORY_IN_USE` 并给出 `counts`；
-- `POST /reassign` 的 `targetCategoryId` 的 `kind` 必须与账单 `direction` 一致，否则返回 `CATEGORY_KIND_MISMATCH`；
+- 删除前校验 `transactions` 与 `budgets` 引用，有引用返回 `409 CATEGORY_IN_USE`，`counts` 同时返回 `transactions`、`budgets`、`rules` 三个计数；
+- 删除时先删除该类别下的 `user_category_rules`，再删除类别本身，避免外键约束失败；
+- `POST /reassign` 同时迁移 `transactions`、`budgets` 与该类别的 `user_category_rules`；
+- 迁移时若目标类别在同一月份已有预算，返回 `409 BUDGET_CONFLICT`，`details` 给出 `{ sourceBudgetId, targetBudgetId, month }`，**不做静默合并**；
+- `POST /reassign` 的 `targetCategoryId` 的 `kind` 必须与账单 `direction` 一致，否则返回 `409 CATEGORY_KIND_MISMATCH`；
 - 自定义类别与预设类别一样参与自动分类，`kind` 只能为 `expense` / `income`。
 
 ## 2.8 预算写入
@@ -337,12 +344,12 @@ DELETE /api/categories/12 → 409
 PUT /api/budgets
 { "month": "2026-11", "scope": "category", "categoryId": 1,
   "amountCents": 100000, "alertThresholds": [80, 100] }
-→ 200 { "scope": "category", "category": { "id": 1, "name": "餐饮" },
+→ 200 { "id": 7, "scope": "category", "category": { "id": 1, "name": "餐饮" },
         "amountCents": 100000, "spentCents": 98000, "remainingCents": 2000,
         "usageRatio": 0.98, "level": "near" }
 ```
 
-规则：`scope=total` 时 `categoryId` 必须为 `null`；`scope=category` 必须提供 `categoryId`；同一 `(month, scope, categoryId)` 幂等覆盖，不产生重复预算。
+规则：`scope=total` 时 `categoryId` 必须为 `null`；`scope=category` 必须提供 `categoryId`；同一 `(month, scope, categoryId)` 幂等覆盖，返回体始终包含预算 `id`，供 `DELETE /api/budgets/:id` 使用；删除不存在的预算返回 `404 BUDGET_NOT_FOUND`。
 
 ## 2.9 账单纠错
 

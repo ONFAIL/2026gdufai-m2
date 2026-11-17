@@ -68,9 +68,10 @@
 | 金额（分） | `amountCents` | 整数，单位分；入库与出站统一使用 | 「价格」 |
 | 金额（元） | `amount` | 仅出现在 M1 入站，最多两位小数 | 在出站接口中使用元 |
 | 商户 | `merchant` | 消费对象；缺失时 M2 填默认并回 `MERCHANT_DEFAULTED` | 「商家」「店名」混用 |
-| 类别 | `category` / `categoryId` | 分类条目；预设 ID 固定（1–11），不得硬编码到前端或话术 | 「标签」「分组」 |
+| 类别 | `category` / `categoryId` | 分类条目；预设 ID 固定（1–12），不得硬编码到前端或话术 | 「标签」「分组」 |
 | 类别性质 | `kind` | 类别所属方向：`expense` / `income` | 与 `direction` 混用 |
-| 预设类别 | `isPreset: true` | 契约第 3 节的 11 个系统类别 | 「默认类别」 |
+| 预设类别 | `isPreset: true` | 契约第 3 节的 12 个系统类别 | 「默认类别」 |
+| 贷款 | `loan` | 收入类别，ID 12；借款到账计入收入，还款不计入收支 | 「借款」「网贷」混用 |
 | 自定义类别 | `custom` / `isPreset: false` | 用户新增的类别 | — |
 | 分类置信度 | `categoryConfidence` | M2 分类结果置信度；< 0.75 回 `LOW_CONFIDENCE_CATEGORY` | 与「抽取置信度」混用 |
 | 作废 | void | 账单逻辑删除，统计默认不计（`includeVoid: false`） | 「删除」 |

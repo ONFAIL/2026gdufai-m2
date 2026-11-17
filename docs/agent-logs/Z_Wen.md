@@ -59,3 +59,20 @@
 - **验证**：复制仓库到全新目录 `D:\m2-fix-verify`（排除 node_modules/.git），`pnpm install --frozen-lockfile` 首次 exit 0，esbuild 两个版本 postinstall 均执行；该目录内 `pnpm -r typecheck/lint/test` 全绿（backend 15 例、frontend 31 例）
 - **人工审核**：采纳
 - **遗留问题**：契约变更 issue 待开；CI workflow（用户提供 `ci.yml`）建议单独 PR 提交
+
+### LOG-Z_Wen-20261117-06
+
+- **时间**：2026-11-17 21:55（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `docs/contract-v1.2` / #11
+- **任务**：按团队要求更新模块 2 契约到 v1.2（用户与鉴权、类别管理、预算写入、账单纠错），并按 reviewer 的 8 条意见修复 P2/P3
+- **关键提示词**：「团队目前要我更新一下接口协议，有关于受契约阻塞项与用户信息存储方案」；reviewer 结论 Request changes，要求先修 P2 契约与交付缺项
+- **代理做了什么**：
+  - 契约 v1.2：新增 §0.1 用户与鉴权（`DEMO_USER_ID` + 可选 Bearer）；§2.7 类别管理；§2.8 预算写入；§2.9 账单纠错；§2.6 增 `INVALID_QUERY_PARAM`；§3 增贷款类别 ID 12
+  - Review 修复：预算响应补 `id`（F1）；预算迁移冲突显式 `409 BUDGET_CONFLICT`（F2）；类别删除/迁移处理 `user_category_rules`（F3）；§2.6 登记 `CATEGORY_KIND_MISMATCH` 与预算错误码（F4）；自定义类别示例改 ID 13（F5）
+  - 同步 `docs/ARCHITECTURE.md`（类别 1–12、鉴权已定）、`docs/GLOSSARY.md`（12 个预设类别、贷款术语）、`.env.example`（`DEMO_USER_ID`）
+  - 本日志条目（S4）
+- **决策**：用户方案采用 A（单用户演示，固定 `DEMO_USER_ID`，入站 userId 必须一致）；预算迁移冲突不静默合并，返回 409 并给出双方预算 id；类别删除先清学习规则再删类别
+- **验证**：`git diff --check` 通过；契约内错误码引用与 §2.6 表逐项核对；本 PR 仅文档，无运行时代码变更
+- **人工审核**：Request changes → 已按意见修改，待复审
+- **遗留问题**：契约变更 issue 已创建（#12），编号已补入契约头部；实现代码在后续 PR 跟进
