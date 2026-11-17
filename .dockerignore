@@ -1,0 +1,16 @@
+.git
+.github
+**/node_modules
+**/dist
+**/coverage
+**/.env
+**/.env.*
+**/*.db*
+**/*.sqlite*
+**/*.log
+**/uploads
+data
+backups
+docs
+frontend-static
+*.zip
