@@ -1,8 +1,8 @@
 # 模块 2 接口交接文档
 
 > 适用对象：模块 1（语音/文字/图片记账）、模块 3（自然语言查账）、模块 4（预算提醒，同进程）
-> 文档版本：v1.2（新增用户与鉴权约定、类别管理/预算写入/账单纠错接口、贷款类别）
-> 冻结依据：contract-change issue #12；本版本仅新增契约，不含实现
+> 文档版本：v1.3（新增退款/还款中性记录：`originalTransactionId`、`entry_type`，统计排除中性记录）
+> 冻结依据：contract-change issue #12；v1.2 契约 + 退款/还款中性记录
 > 维护人：模块 2 负责人
 > 状态：接口定义已冻结；服务端实现按本文档开发中，联调前以本文档为准
 
@@ -54,6 +54,7 @@
       "merchant": null,
       "occurredAt": "2026-11-14T09:12:00+08:00",
       "chatAt": null,
+      "originalTransactionId": null,
       "rawText": "早上瑞幸花了32块5",
       "modality": "text",
       "sourceRef": null,
@@ -79,6 +80,7 @@
 | `merchant` | 记录 | 否 | string \| `null` | 缺失传 `null`，不要传 `"未知"` |
 | `occurredAt` | 记录 | 否 | string \| `null` | 消费发生时间，ISO-8601；日期明确但时间不明可传当天 `T12:00:00+08:00`。**必须是真实存在的日历日期**（如 `2026-02-31` 非法），越界或非法日期整批 `INVALID_BATCH`（`field: records[i].occurredAt`） |
 | `chatAt` | 记录 | 否 | string \| `null` | 该条消息本身发出的时刻；不传则用批次 `sentAt` 兜底 |
+| `originalTransactionId` | 记录 | 否 | string \| `null` | 退款/还款场景下由模块 1 带回的原账单 id；普通记账传 `null` |
 | `rawText` | 记录 | 是 | string | 原始输入文本（语音转写结果也算） |
 | `modality` | 记录 | 是 | `"text"` \| `"voice"` \| `"image"` | 输入形态 |
 | `sourceRef` | 记录 | 否 | string \| `null` | 语音/图片文件路径，**不要把文件内容 base64 塞进 JSON** |
@@ -101,6 +103,7 @@
       "recordId": "r_001",
       "status": "confirmed",
       "transactionId": "tx_01J9Z8Q3K7",
+      "matchedTransactionId": null,
       "direction": "expense",
       "occurredAt": "2026-11-14T09:12:00+08:00",
       "category": { "id": 1, "name": "餐饮", "kind": "expense" },
@@ -145,7 +148,10 @@
 | `TIME_DEFAULTED_TO_CHAT_TIME` | 时间追问不清，已回退聊天时间 | warning | 「时间我按你发消息的时间记了」 |
 | `DIRECTION_FORCED_BY_CATEGORY` | 冲突二次以类别为准 | warning | 「按类别记成了收入」 |
 | `DUPLICATE_RECORD` | 幂等键重复 | warning | 「这笔已经记过了」 |
-| `REFUND_NOT_SUPPORTED` | 文本是退款/退货 | blocking | 「退款请到账单一览里作废原账单」 |
+| `MISSING_ORIGINAL_TRANSACTION` | 退款/还款但缺少原账单 id（首轮） | blocking | 「这笔退款对应哪一笔账单？可以补充金额或日期」 |
+| `REFUND_RECORDED_NEUTRAL` | 退款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请到账单一览作废原账单」 |
+| `REPAYMENT_RECORDED_NEUTRAL` | 还款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请作废原贷款账单」 |
+| `ORIGINAL_NOT_FOUND_RECORDED` | 未匹配到原账单，已归入「其他/其他收入」 | warning | 「没找到原账单，已记为其他且不计收支」 |
 
 > `MISSING_DIRECTION`：兜底到「其他」视为类别识别成功，**不返回该码**；该码保留但当前不可达，存废由 issue #12 决议。
 
@@ -186,6 +192,7 @@
 
 - `dimension=recent7` **不接受** `date/month/year`，固定 `[今天-6, 今天]`，固定 7 个日桶（空日补 0）。
 - 精确模式（day/month/year）返回 **1 个桶**，`summary` 与 `buckets[0]` 数值相同。
+- **统计只包含 `entry_type='normal'` 的记录**：退款/还款等中性记录会保留，但不计入 `expenseCents / incomeCents / netCents / count`。
 
 响应：
 
@@ -239,6 +246,7 @@
 | `from` / `to` | `YYYY-MM-DD`，闭区间 |
 | `direction` | `expense` \| `income`，默认全部 |
 | `limit` | 默认 20，上限 100 |
+| `entryType` | 默认 `normal`；传 `all` 时包含退款/还款中性记录 |
 | `cursor` | 上一页返回的 `nextCursor`，首页不传 |
 
 ```jsonc
@@ -251,6 +259,7 @@
       "direction": "expense",
       "category": { "id": 1, "name": "餐饮", "color": "#F97316", "icon": "🍜" },
       "sourceModality": "image", "sourceRef": "uploads/2026/11/r.jpg",
+      "entryType": "normal",
       "categoryConfidence": 0.92, "status": "confirmed", "anomalyFlag": false }
   ],
   "page": { "limit": 20, "hasMore": true, "nextCursor": "eyJkIjoiMjAyNi0xMS0xNCIsImlkIjoidHhfLi4uIn0" },
@@ -451,7 +460,7 @@ POST /api/transactions/tx_xxx/void
 | 11 | 其他收入 | `#9CA3AF` | 利息、分红、基金、股票、理财、收益、报销 |
 | 12 | 贷款 | `#0EA5E9` | 贷款、借款、借到、放款、下款、借钱 |
 
-> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/退货不算收入**（返回 `REFUND_NOT_SUPPORTED`，引导作废原单）。
+> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/退货记为中性记录**（`entry_type='refund'`），保留但不计入收支；匹配到原账单时引导作废原单。
 
 ---
 
@@ -465,7 +474,7 @@ POST /api/transactions/tx_xxx/void
 - [ ] 未来时间 → 首轮 `FUTURE_TIME`，第二轮兜底
 - [ ] 同一 `idempotencyKey` 重发 → `duplicate`，账单数不变
 - [ ] 方向与类别冲突 → 首轮 `CATEGORY_KIND_MISMATCH`，第二轮按类别覆盖
-- [ ] 文本含「退款」→ `REFUND_NOT_SUPPORTED`
+- [ ] 文本含「退款」→ 首轮 `MISSING_ORIGINAL_TRANSACTION`；带原账单 id 或次轮 → 中性记录 `entry_type='refund'`
 - [ ] 缺 `sentAt` → 整批 `INVALID_BATCH`
 - [ ] 入站 `userId` 与 `DEMO_USER_ID` 不一致 → 整批 `INVALID_BATCH`
 

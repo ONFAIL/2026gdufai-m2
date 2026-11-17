@@ -9,6 +9,8 @@ export interface TransactionListQuery {
   readonly direction?: 'expense' | 'income';
   readonly limit?: number;
   readonly cursor?: string;
+  /** 默认只列正常账单；all 表示包含退款/还款的中性记录。 */
+  readonly entryType?: 'normal' | 'refund' | 'repayment' | 'all';
 }
 
 export interface TransactionItem {
@@ -24,6 +26,7 @@ export interface TransactionItem {
   sourceRef: string | null;
   status: string;
   anomalyFlag: boolean;
+  entryType: 'normal' | 'refund' | 'repayment';
 }
 
 export interface TransactionListResult {
@@ -32,6 +35,7 @@ export interface TransactionListResult {
     from: string | null;
     to: string | null;
     direction: 'expense' | 'income' | null;
+    entryType: 'normal' | 'refund' | 'repayment' | 'all';
   };
   summary: { count: number; expenseCents: number; incomeCents: number };
   items: TransactionItem[];
@@ -85,6 +89,7 @@ interface ListRow {
   category_name: string | null;
   category_color: string | null;
   category_icon: string | null;
+  entry_type: 'normal' | 'refund' | 'repayment';
 }
 
 /** 按契约 §2.3 返回账单一览：游标分页 + 整个筛选集汇总。 */
@@ -102,24 +107,40 @@ export function listTransactions(db: Db, userId: string, query: TransactionListQ
     invalid('from 不能晚于 to');
   }
 
-  const baseConditions = ['t.user_id = ?', "t.status = 'confirmed'"];
-  const baseParams: Array<string | number> = [userId];
+  const filterConditions: string[] = [];
+  const filterParams: Array<string | number> = [];
   if (query.categoryId !== undefined) {
-    baseConditions.push('t.category_id = ?');
-    baseParams.push(query.categoryId);
+    filterConditions.push('t.category_id = ?');
+    filterParams.push(query.categoryId);
   }
   if (query.from !== undefined) {
-    baseConditions.push('t.occurred_date >= ?');
-    baseParams.push(query.from);
+    filterConditions.push('t.occurred_date >= ?');
+    filterParams.push(query.from);
   }
   if (query.to !== undefined) {
-    baseConditions.push('t.occurred_date <= ?');
-    baseParams.push(query.to);
+    filterConditions.push('t.occurred_date <= ?');
+    filterParams.push(query.to);
   }
   if (query.direction !== undefined) {
-    baseConditions.push('t.direction = ?');
-    baseParams.push(query.direction);
+    filterConditions.push('t.direction = ?');
+    filterParams.push(query.direction);
   }
+
+  const entryType = query.entryType ?? 'normal';
+  const baseConditions = ['t.user_id = ?', "t.status = 'confirmed'", ...filterConditions];
+  const baseParams: Array<string | number> = [userId, ...filterParams];
+  if (entryType !== 'all') {
+    baseConditions.push('t.entry_type = ?');
+    baseParams.push(entryType);
+  }
+
+  const summaryConditions = [
+    't.user_id = ?',
+    "t.status = 'confirmed'",
+    "t.entry_type = 'normal'",
+    ...filterConditions
+  ];
+  const summaryParams: Array<string | number> = [userId, ...filterParams];
 
   const conditions = [...baseConditions];
   const params = [...baseParams];
@@ -132,7 +153,7 @@ export function listTransactions(db: Db, userId: string, query: TransactionListQ
   const rows = db
     .prepare(
       `SELECT t.id, t.direction, t.amount_cents, t.merchant, t.occurred_at, t.occurred_date,
-              t.category_confidence, t.source_modality, t.source_ref, t.status, t.anomaly_flag,
+              t.category_confidence, t.source_modality, t.source_ref, t.status, t.anomaly_flag, t.entry_type,
               c.id AS category_id, c.name AS category_name, c.color AS category_color, c.icon AS category_icon
          FROM transactions t
          LEFT JOIN categories c ON c.id = t.category_id
@@ -152,9 +173,9 @@ export function listTransactions(db: Db, userId: string, query: TransactionListQ
               COALESCE(SUM(CASE WHEN direction = 'expense' THEN amount_cents END), 0) AS expense_cents,
               COALESCE(SUM(CASE WHEN direction = 'income' THEN amount_cents END), 0) AS income_cents
          FROM transactions t
-        WHERE ${baseConditions.join(' AND ')}`
+        WHERE ${summaryConditions.join(' AND ')}`
     )
-    .get(...baseParams) as { count: number; expense_cents: number; income_cents: number };
+    .get(...summaryParams) as { count: number; expense_cents: number; income_cents: number };
 
   const items: TransactionItem[] = pageRows.map((row) => ({
     id: row.id,
@@ -176,7 +197,8 @@ export function listTransactions(db: Db, userId: string, query: TransactionListQ
     sourceModality: row.source_modality,
     sourceRef: row.source_ref,
     status: row.status,
-    anomalyFlag: row.anomaly_flag === 1
+    anomalyFlag: row.anomaly_flag === 1,
+    entryType: row.entry_type
   }));
 
   return {
@@ -184,7 +206,8 @@ export function listTransactions(db: Db, userId: string, query: TransactionListQ
       categoryId: query.categoryId ?? null,
       from: query.from ?? null,
       to: query.to ?? null,
-      direction: query.direction ?? null
+      direction: query.direction ?? null,
+      entryType
     },
     summary: {
       count: summaryRow.count,

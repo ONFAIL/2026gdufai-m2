@@ -3,16 +3,17 @@ import type { Db } from '../../db/client.ts';
 import { yuanToCents } from '../../shared/money.ts';
 import { nowIsoShanghai, toShanghaiDate } from '../../shared/time.ts';
 import { classify } from './classifier.ts';
+import { detectSpecialEntry, type SpecialEntry } from './intent.ts';
 import {
   findIntake,
   findTransactionByIdempotencyKey,
+  getTransactionById,
   getTransactionView,
+  insertTransaction,
   listCategories,
   listUserRules,
-  saveIntake,
-  insertTransaction
+  saveIntake
 } from './repository.ts';
-import { isRefund } from './intent.ts';
 import type { CategoryRow, Direction, RawBatch, RawRecord } from './types.ts';
 
 /** 契约 §1.5 登记的反馈码。 */
@@ -21,13 +22,16 @@ export type FeedbackCode =
   | 'MISSING_TIME'
   | 'FUTURE_TIME'
   | 'MISSING_DIRECTION'
+  | 'MISSING_ORIGINAL_TRANSACTION'
   | 'CATEGORY_KIND_MISMATCH'
   | 'LOW_CONFIDENCE_CATEGORY'
   | 'MERCHANT_DEFAULTED'
   | 'TIME_DEFAULTED_TO_CHAT_TIME'
   | 'DIRECTION_FORCED_BY_CATEGORY'
   | 'DUPLICATE_RECORD'
-  | 'REFUND_NOT_SUPPORTED';
+  | 'REFUND_RECORDED_NEUTRAL'
+  | 'REPAYMENT_RECORDED_NEUTRAL'
+  | 'ORIGINAL_NOT_FOUND_RECORDED';
 
 export type FeedbackSeverity = 'blocking' | 'warning';
 
@@ -45,6 +49,8 @@ export interface RecordResult {
   readonly occurredAt: string | null;
   readonly category: { id: number; name: string; kind: Direction } | null;
   readonly confidence: number | null;
+  /** 退款/还款匹配到的原账单 id；未匹配为 null。 */
+  readonly matchedTransactionId: string | null;
   readonly feedback: FeedbackItem[];
 }
 
@@ -59,6 +65,8 @@ export const MAX_FOLLOWUP_ROUNDS = 2;
 const LOW_CONFIDENCE_THRESHOLD = 0.75;
 /** 商户缺失时的默认值，契约 §1.5 MERCHANT_DEFAULTED。 */
 const DEFAULT_MERCHANT = '未知账号';
+/** 退款/还款原账单的匹配窗口。 */
+const MATCH_WINDOW_DAYS = 30;
 
 function blocking(field: string | null, code: FeedbackCode): FeedbackItem {
   return { field, code, severity: 'blocking' };
@@ -95,6 +103,11 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+function withinMatchWindow(occurredAt: string, now: Date): boolean {
+  const diff = now.getTime() - Date.parse(occurredAt);
+  return diff >= 0 && diff <= MATCH_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+}
+
 function rejectedResult(record: RawRecord, codes: FeedbackItem[]): RecordResult {
   return {
     recordId: record.recordId,
@@ -104,6 +117,7 @@ function rejectedResult(record: RawRecord, codes: FeedbackItem[]): RecordResult 
     occurredAt: null,
     category: null,
     confidence: null,
+    matchedTransactionId: null,
     feedback: codes
   };
 }
@@ -125,19 +139,127 @@ function persistPending(
     transactionId: null,
     feedback
   });
-  const result = rejected
+  return rejected
     ? rejectedResult(record, feedback)
     : {
         recordId: record.recordId,
-        status: 'pending_followup' as const,
+        status: 'pending_followup',
         transactionId: null,
         direction: record.direction ?? 'expense',
         occurredAt: record.occurredAt,
         category: null,
         confidence: null,
+        matchedTransactionId: null,
         feedback
       };
-  return result;
+}
+
+/** 写入退款/还款记录：保留但不计入收支统计。 */
+function insertNeutral(
+  db: Db,
+  batch: RawBatch,
+  record: RawRecord,
+  round: number,
+  kind: SpecialEntry,
+  resolved: { amountCents: number; occurredAt: string; category: CategoryRow | null },
+  extraFeedback: FeedbackItem[]
+): RecordResult {
+  const direction: Direction = record.direction ?? 'expense';
+  const category = resolved.category;
+  const merchant = record.merchant?.trim() === '' || record.merchant === null ? DEFAULT_MERCHANT : record.merchant;
+  const feedback = [...extraFeedback];
+  if (merchant === DEFAULT_MERCHANT) {
+    feedback.push(warning('merchant', 'MERCHANT_DEFAULTED'));
+  }
+
+  const transactionId = `tx_${randomUUID()}`;
+  const nowIso = nowIsoShanghai();
+  const matchedTransactionId =
+    kind === 'refund' || kind === 'repayment' ? record.originalTransactionId : null;
+
+  db.transaction(() => {
+    insertTransaction(db, {
+    id: transactionId,
+    userId: record.userId,
+    direction,
+    directionSource: record.direction !== null ? 'explicit' : 'category',
+    amountCents: resolved.amountCents,
+    merchant,
+    note: record.rawText,
+    occurredAt: resolved.occurredAt,
+    occurredDate: toShanghaiDate(resolved.occurredAt),
+    timeSource: 'explicit',
+    chatAt: null,
+    categoryId: category?.id ?? null,
+    categorySource: 'fallback',
+    categoryConfidence: 0.3,
+    sourceModality: record.modality,
+    sourceRef: record.sourceRef,
+    idempotencyKey: record.idempotencyKey,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    entryType: kind as 'refund' | 'repayment',
+    matchedTransactionId
+  });
+
+  saveIntake(db, {
+    idempotencyKey: record.idempotencyKey,
+    recordId: record.recordId,
+    batchId: batch.batchId,
+    status: 'confirmed',
+    followupRound: round,
+    transactionId,
+    feedback
+    });
+  })();
+
+  return {
+    recordId: record.recordId,
+    status: 'confirmed',
+    transactionId,
+    direction,
+    occurredAt: resolved.occurredAt,
+    category: toView(category),
+    confidence: 0.3,
+    matchedTransactionId,
+    feedback
+  };
+}
+
+/** 处理退款/还款：30 天内且带原账单 id 才算匹配，否则首轮追问、次轮兜底。 */
+function handleSpecialEntry(
+  db: Db,
+  batch: RawBatch,
+  record: RawRecord,
+  round: number,
+  kind: SpecialEntry,
+  resolved: { amountCents: number; occurredAt: string; category: CategoryRow | null },
+  timeFeedback: FeedbackItem[],
+  now: Date
+): RecordResult {
+  if (record.originalTransactionId !== null) {
+    const original = getTransactionById(db, record.originalTransactionId, record.userId);
+    if (original !== null && original.entryType === 'normal' && withinMatchWindow(original.occurredAt, now)) {
+      return insertNeutral(db, batch, record, round, kind, resolved, [
+        ...timeFeedback,
+        warning(
+          'originalTransactionId',
+          kind === 'refund' ? 'REFUND_RECORDED_NEUTRAL' : 'REPAYMENT_RECORDED_NEUTRAL'
+        )
+      ]);
+    }
+  }
+
+  if (round === 0) {
+    return persistPending(db, batch, record, round, [
+      blocking('originalTransactionId', 'MISSING_ORIGINAL_TRANSACTION')
+    ]);
+  }
+
+  return insertNeutral(db, batch, record, round, kind, resolved, [
+    ...timeFeedback,
+    warning('originalTransactionId', 'ORIGINAL_NOT_FOUND_RECORDED')
+  ]);
 }
 
 function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: CategoryRow[]): RecordResult {
@@ -154,6 +276,7 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
       occurredAt: view?.occurredAt ?? null,
       category: view?.category ?? null,
       confidence: null,
+      matchedTransactionId: null,
       feedback: [warning(null, 'DUPLICATE_RECORD')]
     };
   }
@@ -174,11 +297,6 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
     return persistPending(db, batch, record, round, [blocking(null, 'MISSING_AMOUNT')], true);
   }
 
-  // 退款/退货不计收入，也不生成新账单。
-  if (isRefund(record.rawText)) {
-    return persistPending(db, batch, record, round, [blocking('rawText', 'REFUND_NOT_SUPPORTED')], true);
-  }
-
   // 金额缺失或非正数：必须追问，绝不猜。
   if (record.amount === null || record.amount <= 0) {
     const feedback = [blocking('amount', 'MISSING_AMOUNT')];
@@ -194,8 +312,7 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
 
   if (occurredAt === null) {
     if (round === 0) {
-      const feedback = [blocking('occurredAt', 'MISSING_TIME')];
-      return persistPending(db, batch, record, round, feedback);
+      return persistPending(db, batch, record, round, [blocking('occurredAt', 'MISSING_TIME')]);
     }
     chatAt = record.chatAt ?? batch.sentAt;
     occurredAt = chatAt;
@@ -203,13 +320,31 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
     timeFeedback.push(warning('occurredAt', 'TIME_DEFAULTED_TO_CHAT_TIME'));
   } else if (isFuture(occurredAt, now)) {
     if (round === 0) {
-      const feedback = [blocking('occurredAt', 'FUTURE_TIME')];
-      return persistPending(db, batch, record, round, feedback);
+      return persistPending(db, batch, record, round, [blocking('occurredAt', 'FUTURE_TIME')]);
     }
     chatAt = record.chatAt ?? batch.sentAt;
     occurredAt = chatAt;
     timeSource = 'chat_time';
     timeFeedback.push(warning('occurredAt', 'TIME_DEFAULTED_TO_CHAT_TIME'));
+  }
+
+  const amountCents = yuanToCents(record.amount);
+  const directionForFallback: Direction = record.direction ?? 'expense';
+  const resolvedCategory = fallbackCategory(categories, directionForFallback);
+
+  // 退款/还款：保留记录但不计入收支。
+  const special = detectSpecialEntry(record.rawText);
+  if (special !== null) {
+    return handleSpecialEntry(
+      db,
+      batch,
+      record,
+      round,
+      special,
+      { amountCents, occurredAt, category: resolvedCategory },
+      timeFeedback,
+      now
+    );
   }
 
   // 分类：先按全类别匹配，冲突检测才有依据。
@@ -229,9 +364,7 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
 
   if (record.direction !== null && category !== null && category.kind !== record.direction) {
     if (round === 0) {
-      return persistPending(db, batch, record, round, [
-        blocking('direction', 'CATEGORY_KIND_MISMATCH')
-      ]);
+      return persistPending(db, batch, record, round, [blocking('direction', 'CATEGORY_KIND_MISMATCH')]);
     }
     direction = category.kind;
     directionSource = 'category';
@@ -258,7 +391,6 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
     feedback.push(warning('merchant', 'MERCHANT_DEFAULTED'));
   }
 
-  const amountCents = yuanToCents(record.amount);
   const occurredDate = toShanghaiDate(occurredAt);
   const transactionId = `tx_${randomUUID()}`;
   const nowIso = nowIsoShanghai();
@@ -282,7 +414,9 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
     sourceRef: record.sourceRef,
     idempotencyKey: record.idempotencyKey,
     createdAt: nowIso,
-    updatedAt: nowIso
+    updatedAt: nowIso,
+    entryType: 'normal' as const,
+    matchedTransactionId: null
   };
   const intakeInput = {
     idempotencyKey: record.idempotencyKey,
@@ -320,6 +454,7 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
           occurredAt: existingTransaction.occurredAt,
           category: existingTransaction.category,
           confidence: null,
+          matchedTransactionId: null,
           feedback: duplicateFeedback
         };
       }
@@ -335,6 +470,7 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
     occurredAt,
     category: toView(category),
     confidence: classification.confidence,
+    matchedTransactionId: null,
     feedback
   };
 }

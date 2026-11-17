@@ -1,4 +1,4 @@
-﻿/** 收支方向。入站可为 null（未判定），入库前必然确定。 */
+/** 收支方向。入站可为 null（未判定），入库前必然确定。 */
 export type Direction = 'expense' | 'income';
 
 /** 输入形态，对应契约 1.3 的 modality。 */
@@ -17,6 +17,8 @@ export interface RawRecord {
   readonly merchant: string | null;
   readonly occurredAt: string | null;
   readonly chatAt: string | null;
+  /** 退款/还款场景下由模块 1 带回的原账单 id；正常记账为 null。 */
+  readonly originalTransactionId: string | null;
   readonly rawText: string;
   readonly modality: Modality;
   readonly sourceRef: string | null;

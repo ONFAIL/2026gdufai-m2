@@ -192,7 +192,13 @@ export function buildStats(db: Db, userId: string, query: StatsQuery): StatsResu
   const direction = query.direction ?? 'all';
   const order = query.order ?? 'asc';
 
-  const conditions = ['user_id = ?', "status = 'confirmed'", 'occurred_date BETWEEN ? AND ?'];
+  const conditions = [
+    'user_id = ?',
+    "status = 'confirmed'",
+    // 退款/还款记录保留但为中性记录，不计入收支统计
+    "entry_type = 'normal'",
+    'occurred_date BETWEEN ? AND ?'
+  ];
   const params: Array<string | number> = [userId, range.start, range.end];
 
   if (direction !== 'all') {

@@ -24,14 +24,14 @@ db.prepare('INSERT OR IGNORE INTO users (id, nickname, created_at) VALUES (?, ?,
   '2026-11-01T00:00:00+08:00'
 );
 
-function insert(id: string, date: string, amountCents: number, categoryId: number): void {
+function insert(id: string, date: string, amountCents: number, categoryId: number, entryType = 'normal'): void {
   db.prepare(
     `INSERT INTO transactions
        (id, user_id, direction, direction_source, amount_cents, merchant, note, occurred_at, occurred_date,
         time_source, chat_at, category_id, category_source, category_confidence, status, source_modality,
-        source_ref, anomaly_flag, idempotency_key, created_at, updated_at)
+        source_ref, anomaly_flag, idempotency_key, created_at, updated_at, entry_type, matched_transaction_id)
      VALUES (?, ?, 'expense', 'explicit', ?, '测试商户', NULL, ?, ?, 'explicit', NULL, ?, 'rule', 0.9, 'confirmed',
-             'text', NULL, 0, ?, ?, ?)`
+             'text', NULL, 0, ?, ?, ?, ?, NULL)`
   ).run(
     id,
     USER,
@@ -41,13 +41,15 @@ function insert(id: string, date: string, amountCents: number, categoryId: numbe
     categoryId,
     `key_${id}`,
     '2026-11-01T00:00:00+08:00',
-    '2026-11-01T00:00:00+08:00'
+    '2026-11-01T00:00:00+08:00',
+    entryType
   );
 }
 
 insert('tx_a', '2026-11-14', 1000, 1);
 insert('tx_b', '2026-11-13', 2000, 2);
 insert('tx_c', '2026-11-12', 3000, 1);
+insert('tx_refund', '2026-11-15', 500, 8, 'refund');
 
 afterAll(async () => {
   await app.close();
@@ -88,6 +90,13 @@ describe('GET /api/transactions', () => {
     expect(result.body.items).toEqual([]);
     expect(result.body.meta.isEmpty).toBe(true);
     expect(result.body.summary.count).toBe(0);
+  });
+
+  it('entryType=all 时包含中性记录，但汇总仍只算正常账单', async () => {
+    const result = await list('entryType=all');
+    expect(result.body.items).toHaveLength(4);
+    expect(result.body.items[0]).toMatchObject({ id: 'tx_refund', entryType: 'refund' });
+    expect(result.body.summary).toMatchObject({ count: 3, expenseCents: 6000 });
   });
 
   it('非法方向返回 422', async () => {

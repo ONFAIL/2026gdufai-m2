@@ -166,15 +166,86 @@ describe('POST /api/transactions/import', () => {
     });
   });
 
-  it('退款不计收入，返回 REFUND_NOT_SUPPORTED', async () => {
-    const result = await send([
-      record({ idempotencyKey: 'k-refund', rawText: '昨天买的鞋退款 299', amount: 299 })
+  it('退款带原账单且在 30 天内：保留记录但不计入收支', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-refund-orig', rawText: '买鞋 299', amount: 299, merchant: '鞋店' })
     ]);
-    expect(result.body.results[0].status).toBe('rejected');
-    expect(result.body.results[0].feedback).toContainEqual({
-      field: 'rawText',
-      code: 'REFUND_NOT_SUPPORTED',
+    const originalId = original.body.results[0].transactionId as string;
+
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11&userId=u1' })
+    ).json().summary;
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-refund-matched',
+        rawText: '退款 299',
+        amount: 299,
+        originalTransactionId: originalId
+      })
+    ]);
+    const item = refund.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.matchedTransactionId).toBe(originalId);
+    expect(item.category).toMatchObject({ id: 8, name: '其他' });
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'REFUND_RECORDED_NEUTRAL',
+      severity: 'warning'
+    });
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11&userId=u1' })
+    ).json().summary;
+    expect(after).toEqual(before);
+  });
+
+  it('退款没带原账单 id：首轮追问，次轮归入其他且不计收支', async () => {
+    const key = 'k-refund-no-original';
+    const first = await send([record({ idempotencyKey: key, rawText: '退款 50', amount: 50 })]);
+    expect(first.body.results[0].status).toBe('pending_followup');
+    expect(first.body.results[0].feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'MISSING_ORIGINAL_TRANSACTION',
       severity: 'blocking'
+    });
+
+    const second = await send([record({ idempotencyKey: key, rawText: '退款 50', amount: 50 })]);
+    const item = second.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.matchedTransactionId).toBeNull();
+    expect(item.category).toMatchObject({ name: '其他' });
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_NOT_FOUND_RECORDED',
+      severity: 'warning'
+    });
+  });
+
+  it('原账单超过 30 天视为未匹配', async () => {
+    const original = await send([
+      record({
+        idempotencyKey: 'k-old-orig',
+        rawText: '买鞋 100',
+        amount: 100,
+        occurredAt: '2026-09-01T12:00:00+08:00'
+      })
+    ]);
+    const oldId = original.body.results[0].transactionId as string;
+
+    const first = await send([
+      record({
+        idempotencyKey: 'k-old-refund',
+        rawText: '退款 100',
+        amount: 100,
+        originalTransactionId: oldId
+      })
+    ]);
+    expect(first.body.results[0].status).toBe('pending_followup');
+    expect(first.body.results[0].feedback).toContainEqual({
+      code: 'MISSING_ORIGINAL_TRANSACTION',
+      severity: 'blocking',
+      field: 'originalTransactionId'
     });
   });
 
@@ -261,17 +332,20 @@ describe('POST /api/transactions/import', () => {
   });
 
   it('rejected 重发时保留原 feedback 的 field 与 severity', async () => {
-    const key = 'k-refund-replay';
-    const payload = record({ idempotencyKey: key, rawText: '退款 32.5', amount: 32.5 });
+    const key = 'k-reject-replay';
+    const payload = record({ idempotencyKey: key, amount: null });
 
-    const first = await send([payload]);
-    expect(first.body.results[0].status).toBe('rejected');
-    expect(first.body.results[0].feedback[0]).toMatchObject({ field: 'rawText', severity: 'blocking' });
+    await send([payload]);
+    await send([payload]);
+    const third = await send([payload]);
+    expect(third.body.results[0].status).toBe('rejected');
+    expect(third.body.results[0].feedback[0]).toMatchObject({ field: 'amount', severity: 'blocking' });
 
-    const second = await send([payload]);
-    expect(second.body.results[0].feedback[0]).toMatchObject({
-      field: 'rawText',
-      code: 'REFUND_NOT_SUPPORTED',
+    const fourth = await send([payload]);
+    expect(fourth.body.results[0].status).toBe('rejected');
+    expect(fourth.body.results[0].feedback[0]).toMatchObject({
+      field: 'amount',
+      code: 'MISSING_AMOUNT',
       severity: 'blocking'
     });
   });

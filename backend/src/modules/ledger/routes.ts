@@ -108,6 +108,7 @@ export async function registerLedgerRoutes(app: FastifyInstance): Promise<void> 
     const categoryIdText = firstValue(query.categoryId);
     const limitText = firstValue(query.limit);
     const directionText = firstValue(query.direction);
+    const entryTypeText = firstValue(query.entryType);
 
     const listQuery: TransactionListQuery = {
       categoryId: categoryIdText === undefined ? undefined : Number(categoryIdText),
@@ -120,7 +121,16 @@ export async function registerLedgerRoutes(app: FastifyInstance): Promise<void> 
             ? directionText
             : invalid('direction 必须是 expense / income'),
       limit: limitText === undefined ? undefined : Number(limitText),
-      cursor: firstValue(query.cursor)
+      cursor: firstValue(query.cursor),
+      entryType:
+        entryTypeText === undefined
+          ? undefined
+          : entryTypeText === 'all' ||
+              entryTypeText === 'normal' ||
+              entryTypeText === 'refund' ||
+              entryTypeText === 'repayment'
+            ? entryTypeText
+            : invalid('entryType 必须是 all / normal / refund / repayment')
     };
     if (listQuery.categoryId !== undefined && (!Number.isInteger(listQuery.categoryId) || listQuery.categoryId <= 0)) {
       invalid('categoryId 必须是正整数');
