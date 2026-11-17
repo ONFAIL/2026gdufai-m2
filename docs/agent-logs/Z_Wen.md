@@ -225,4 +225,23 @@
 - **人工审核**：待复审
 - **遗留问题**：前端 mock/verify2 的贷款 12 属前端模块，需 @ 前端负责人同步；#10 待 rebase
 
+### LOG-Z_Wen-20261117-04
 
+- **时间**：2026-11-17 20:50（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-query-api` / 待建
+- **任务**：实现统计、账单一览与类别字典三个读取接口（契约 §2.2 / §2.3 / §2.4）
+- **关键提示词**：继续完成 M2 剩余部分；统计口径严格按契约 2.2
+- **代理做了什么**：
+  - `modules/ledger/stats.ts`：day/month/year/recent7、类别拆分、收支净额、topCategory、维度参数校验
+  - `modules/ledger/transactions.ts`：游标分页（base64url `date|id`）、筛选、整集 summary、`meta.isEmpty`
+  - `repository.ts` 追加 `listCategoryItems`
+  - `routes.ts` 注册三个 GET 接口
+  - 测试：stats 6、transactions 5、categories 1
+- **决策**：
+  - 统计桶包含 `netCents`（契约字段），即使前端类型暂未声明
+  - 参数错误统一用 `INVALID_DIMENSION_PARAM`(422) 返回，因为契约 §2.6 没有专门的查询参数错误码（已知缺口，后续可走契约变更）
+  - 类别字典返回全部类别（含停用），由前端按 `isActive` 过滤，保证历史账单可展示
+- **验证**：`pnpm --filter @gduf/backend typecheck / lint / test` 全绿，59 个用例通过（新增 12 例）
+- **人工审核**：采纳
+- **遗留问题**：契约缺类别 CRUD、预算写入、账单作废；M4 预算提醒未开始
