@@ -48,6 +48,13 @@ docker compose up --build
 镜像中的前端固定使用真实 API（`VITE_USE_MOCK=false`）；当前仍为开发骨架，尚未实现的业务接口会返回错误，容器启动通过不代表记账功能已完成。
 数据库与上传目录在容器内固定为 `/app/data/app.db`、`/app/uploads`；`docker compose down` 保留数据，`down --volumes` 会删除数据。
 
+### 用户与鉴权变量（契约 v1.2）
+
+| 变量 | 默认值 | 用途 | 实现状态 |
+|---|---|---|---|
+| `DEMO_USER_ID` | `u_001` | 单用户演示的唯一用户；入站记录的 `userId` 必须与之一致，否则整批 `INVALID_BATCH` | 契约 v1.2 已定义，服务端校验待后续 PR 实现 |
+| `APP_AUTH_TOKEN` | `change-me` | Bearer 鉴权令牌；为空或 `change-me` 时按开发模式放行 | 同上，鉴权钩子待实现 |
+
 #### 已有数据卷出现权限错误
 
 镜像构建时的 `chown` 不会修复已经存在的命名卷。遇到 `EACCES` 或 SQLite 无法写入时，在原部署目录、使用原 Compose project 和镜像执行下面的维护流程。先停止所有写入这两个卷的服务；任何一步失败都先停止排查，备份未成功落盘前不要修改权限。

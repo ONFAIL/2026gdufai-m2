@@ -285,7 +285,7 @@
 | `INVALID_QUERY_PARAM` | 422 | 查询参数非法（分页、筛选、游标等） |
 | `CATEGORY_NOT_FOUND` | 404 | 类别不存在 |
 | `CATEGORY_IN_USE` | 409 | 删除有数据的类别，返回 `counts` |
-| `CATEGORY_KIND_MISMATCH` | 409 | 迁移或修改类别时，目标类别 `kind` 与账单 `direction` 不一致 |
+| `CATEGORY_KIND_MISMATCH` | 409 | 迁移类别（`reassign`）时，目标类别 `kind` 与账单 `direction` 不一致 |
 | `BUDGET_NOT_FOUND` | 404 | 预算不存在 |
 | `BUDGET_CONFLICT` | 409 | 迁移预算时目标类别同月已有预算，`details` 返回冲突双方预算 id |
 | `UNAUTHORIZED` | 401 | 缺少/错误的鉴权头 |
@@ -295,7 +295,7 @@
 >
 > ```jsonc
 > { "error": { "code": "CATEGORY_IN_USE", "message": "该类别下还有 12 笔账单", "field": "categoryId",
->              "details": { "counts": { "transactions": 12, "budgets": 1 } } } }
+>              "details": { "counts": { "transactions": 12, "budgets": 1, "rules": 3 } } } }
 > ```
 
 ---
@@ -331,6 +331,7 @@ DELETE /api/categories/13 → 409
 - `POST /reassign` 同时迁移 `transactions`、`budgets` 与该类别的 `user_category_rules`；
 - 迁移时若目标类别在同一月份已有预算，返回 `409 BUDGET_CONFLICT`，`details` 给出 `{ sourceBudgetId, targetBudgetId, month }`，**不做静默合并**；
 - `POST /reassign` 的 `targetCategoryId` 的 `kind` 必须与账单 `direction` 一致，否则返回 `409 CATEGORY_KIND_MISMATCH`；
+- `POST /reassign` 的校验与三类更新（`transactions`、`budgets`、`user_category_rules`）在**同一个数据库事务**内执行；目标类别不存在、`kind` 冲突或预算冲突任一项失败时**整体回滚**，不允许出现部分迁移；
 - 自定义类别与预设类别一样参与自动分类，`kind` 只能为 `expense` / `income`。
 
 ## 2.8 预算写入
