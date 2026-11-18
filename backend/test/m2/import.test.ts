@@ -231,6 +231,32 @@ describe('POST /api/transactions/import', () => {
     expect(second.body.results[0].occurredAt).toBe(SENT_AT);
   });
 
+  it('5 分钟容差内（+1 分钟）不判未来，超过容差（+6 分钟）判未来', async () => {
+    const inOneMinute = new Date(Date.now() + 60 * 1000)
+      .toISOString()
+      .replace(/\.\d{3}Z$/, '+00:00');
+    const withinTolerance = await send([
+      record({ idempotencyKey: 'k-tolerance-in', occurredAt: inOneMinute, rawText: '瑞幸 1' })
+    ]);
+    expect(withinTolerance.body.results[0].status).toBe('confirmed');
+    expect(withinTolerance.body.results[0].feedback).not.toContainEqual(
+      expect.objectContaining({ code: 'FUTURE_TIME' })
+    );
+
+    const inSixMinutes = new Date(Date.now() + 6 * 60 * 1000)
+      .toISOString()
+      .replace(/\.\d{3}Z$/, '+00:00');
+    const beyondTolerance = await send([
+      record({ idempotencyKey: 'k-tolerance-out', occurredAt: inSixMinutes })
+    ]);
+    expect(beyondTolerance.body.results[0].status).toBe('pending_followup');
+    expect(beyondTolerance.body.results[0].feedback).toContainEqual({
+      field: 'occurredAt',
+      code: 'FUTURE_TIME',
+      severity: 'blocking'
+    });
+  });
+
   it('rejected 重发时保留原 feedback 的 field 与 severity', async () => {
     const key = 'k-refund-replay';
     const payload = record({ idempotencyKey: key, rawText: '退款 32.5', amount: 32.5 });

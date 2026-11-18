@@ -80,8 +80,8 @@ function fallbackCategory(categories: readonly CategoryRow[], direction: Directi
   return categories.find((item) => item.kind === kind && item.name === name) ?? null;
 }
 
-/** 未来时间容差：仅吸收时钟抖动，不吸收业务语义。 */
-const FUTURE_TOLERANCE_MS = 60_000;
+/** 未来时间容差：与契约 §1.5 一致，5 分钟。 */
+const FUTURE_TOLERANCE_MS = 5 * 60_000;
 
 function isFuture(iso: string, now: Date): boolean {
   return Date.parse(iso) > now.getTime() + FUTURE_TOLERANCE_MS;
