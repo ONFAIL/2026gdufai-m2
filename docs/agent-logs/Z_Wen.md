@@ -113,3 +113,20 @@
 - **验证**：`git diff --check` 通过；契约错误码表、§2.7 计数规则、§2.8 阈值约束逐条核对；本 PR 仍为文档变更
 - **人工审核**：第三轮 Request changes → 已修改，待复审
 - **遗留问题**：`ErrorCode` 的 4 个新码（`INVALID_QUERY_PARAM` / `CATEGORY_NAME_TAKEN` / `CATEGORY_KIND_MISMATCH` / `BUDGET_CONFLICT`）与 `demoUserId` 配置由实现 PR 补齐；预设类别 11→12 的 7 项改动见 review C2 清单
+
+### LOG-Z_Wen-20261118-02
+
+- **时间**：2026-11-18 16:10（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `docs/contract-v1.2` / #11（补齐 reviewer 第 3 节契约决议）
+- **任务**：把 reviewer 在 issue #12 指出的 5 条未决契约决议写进 v1.2，避免合并后立刻出 v1.3
+- **关键提示词**：reviewer 列出「本 issue 仍需定稿的契约决议」，要求 #11 覆盖或明确处理
+- **代理做了什么**：
+  - §1.3：`occurredAt` 必须是真实日历日期，越界整批 `INVALID_BATCH`（对应 A1）
+  - §1.5：`FUTURE_TIME` 定义容差为「超过当前时间 5 分钟」；`DUPLICATE_RECORD` 严重度由 blocking 改为 warning，与 §1.4「按成功处理」一致
+  - §1.5：`feedback[]` 增加可选 `candidates`（最多 3 个，仅 `LOW_CONFIDENCE_CATEGORY`）
+  - §1.6：幂等重发时 `feedback` 原样返回，`intake_log` 保存完整 feedback 对象而非仅 code
+- **决策**：容差取 5 分钟（覆盖时钟偏差，避免把「刚发生」误判为未来）；candidates 上限 3，控制响应体大小
+- **验证**：`git diff --check` 通过；契约内引用与反馈码表逐条核对
+- **人工审核**：待第四轮复审
+- **遗留问题**：实现侧需同步——`intake.ts` 的未来判断由 24h 改为 5 分钟、`last_codes` 改存完整 feedback、`classify()` 返回候选、`validation.ts` 增加真实日期校验

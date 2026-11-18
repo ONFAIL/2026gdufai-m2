@@ -77,7 +77,7 @@
 | `direction` | 记录 | 否 | `"expense"` \| `"income"` \| `null` | 判断不了就传 `null`，**不要猜** |
 | `amount` | 记录 | 否 | number \| `null` | **单位：元**，最多两位小数；识别不出传 `null`，**不要传 0** |
 | `merchant` | 记录 | 否 | string \| `null` | 缺失传 `null`，不要传 `"未知"` |
-| `occurredAt` | 记录 | 否 | string \| `null` | 消费发生时间，ISO-8601；日期明确但时间不明可传当天 `T12:00:00+08:00` |
+| `occurredAt` | 记录 | 否 | string \| `null` | 消费发生时间，ISO-8601；日期明确但时间不明可传当天 `T12:00:00+08:00`。**必须是真实存在的日历日期**（如 `2026-02-31` 非法），越界或非法日期整批 `INVALID_BATCH`（`field: records[i].occurredAt`） |
 | `chatAt` | 记录 | 否 | string \| `null` | 该条消息本身发出的时刻；不传则用批次 `sentAt` 兜底 |
 | `rawText` | 记录 | 是 | string | 原始输入文本（语音转写结果也算） |
 | `modality` | 记录 | 是 | `"text"` \| `"voice"` \| `"image"` | 输入形态 |
@@ -125,22 +125,26 @@
 ```jsonc
 "feedback": [
   { "field": "amount", "code": "MISSING_AMOUNT", "severity": "blocking" },
-  { "field": "merchant", "code": "MERCHANT_DEFAULTED", "severity": "warning" }
+  { "field": "merchant", "code": "MERCHANT_DEFAULTED", "severity": "warning" },
+  { "field": "category", "code": "LOW_CONFIDENCE_CATEGORY", "severity": "warning",
+    "candidates": [ { "id": 1, "name": "餐饮" }, { "id": 3, "name": "购物" } ] }
 ]
 ```
+
+> `candidates` 为可选字段，最多 3 个，仅 `LOW_CONFIDENCE_CATEGORY` 携带；其余码不需要。
 
 | code | 触发条件 | 严重度 | 模块 1 建议话术（文案可改，语义别变） |
 |---|---|---|---|
 | `MISSING_AMOUNT` | 金额空/0/负 | blocking | 「这笔大概花了多少钱？」 |
 | `MISSING_TIME` | 时间缺失（首轮） | blocking | 「这是哪天的消费？」 |
-| `FUTURE_TIME` | 时间在未来（首轮） | blocking | 「这个时间是未来的，是不是记错了？」 |
+| `FUTURE_TIME` | 时间超过当前时间 **5 分钟**（容忍时钟偏差，首轮） | blocking | 「这个时间是未来的，是不是记错了？」 |
 | `MISSING_DIRECTION` | 方向和类别都判不出 | blocking | 「这笔是支出还是收入？」 |
 | `CATEGORY_KIND_MISMATCH` | 方向与类别冲突（首轮） | blocking | 「你说是支出，但类别是工资，以哪个为准？」 |
 | `LOW_CONFIDENCE_CATEGORY` | 分类置信度 < 0.75 | warning | 「我把它归到了其他，可以帮我选个类别吗？」（附 `candidates`） |
 | `MERCHANT_DEFAULTED` | 商户缺失 | warning | 「商户我填了未知账号，要补吗？」 |
 | `TIME_DEFAULTED_TO_CHAT_TIME` | 时间追问不清，已回退聊天时间 | warning | 「时间我按你发消息的时间记了」 |
 | `DIRECTION_FORCED_BY_CATEGORY` | 冲突二次以类别为准 | warning | 「按类别记成了收入」 |
-| `DUPLICATE_RECORD` | 幂等键重复 | blocking | 「这笔已经记过了」 |
+| `DUPLICATE_RECORD` | 幂等键重复 | warning | 「这笔已经记过了」 |
 | `REFUND_NOT_SUPPORTED` | 文本是退款/退货 | blocking | 「退款请到账单一览里作废原账单」 |
 
 ### 1.6 追问轮次怎么算
@@ -149,6 +153,7 @@
 - 同一笔重发时：`idempotencyKey` 不变，已确认的字段填上，**未确认的字段继续传 `null`**。
 - 第 2 轮起，如果时间仍为空或在未来，模块 2 会用 `chatAt`（或批次 `sentAt`）兜底入库，并回 `TIME_DEFAULTED_TO_CHAT_TIME`。
 - 同一笔追问满 **3 轮** 仍无法解决，模块 2 返回 `rejected`，模块 1 提示用户手动补录。
+- 幂等重发时，`feedback` **按原样返回**（保留 `field`、`severity` 与 `candidates`），不得只回 `code`；模块 2 需在 `intake_log` 中保存完整 feedback 对象。
 
 ### 1.7 模块 1 必须守的三条
 
