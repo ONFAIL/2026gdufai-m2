@@ -141,6 +141,11 @@ export function listTransactions(db: Db, userId: string, query: TransactionListQ
     ...filterConditions
   ];
   const summaryParams: Array<string | number> = [userId, ...filterParams];
+  if (entryType !== 'all' && entryType !== 'normal') {
+    // 筛选集与 normal 的交集为空（例如 entryType=refund），summary 计 0。
+    summaryConditions.push('t.entry_type = ?');
+    summaryParams.push(entryType);
+  }
 
   const conditions = [...baseConditions];
   const params = [...baseParams];

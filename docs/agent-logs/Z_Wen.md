@@ -356,3 +356,23 @@
 - **验证**：`typecheck` / `lint` / `test` 全绿；`git diff --check` 无输出
 - **人工审核**：待复审
 - **遗留问题**：前端 mock/`contract.ts` 反馈码需同步，建议新开 issue 跟踪
+### LOG-Z_Wen-20261118-14
+
+- **时间**：2026-11-18 23:15（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17（第三轮复审修复）
+- **任务**：修复匹配方向、time_source、追问轮次共享与 isEmpty 口径
+- **关键提示词**：reviewer 指出还款匹配后被打成 income、未来时间兜底仍写 explicit、退款可能从未被问原单、只有中性记录的月份 isEmpty=true
+- **代理做了什么**：
+  - 中性记录方向统一由 kind 决定（退款 income / 还款 expense），不再取原账单方向；directionSource 记 category
+  - 	imeSource/chatAt 从 processRecord 传入 insertNeutral，未来时间兜底也写 chat_time
+  - 追问改为按「是否问过原账单」判断（读 existing.feedback），不再按轮次
+  - stats.isEmpty 改为依据区间内是否有任何记录（含中性），summary.count 仍只算 normal
+  - summary 增加 entryType 交集条件：entryType=refund 时 count=0
+  - 契约 §2.2 补 isEmpty 口径、§2.3 措辞放宽、§5.1 升 v1.3 并补退款语义
+  - 删除过期文档 docs/handover-m2-contract-and-user.md
+  - 测试：新增还款端到端、entryType=refund、entryType 非法值、中性记录 duplicate 回放
+- **决策**：中性记录方向只看类型；isEmpty 看「有无记录」而非「有无收支」
+- **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **91 例**；git diff --check 无输出
+- **人工审核**：待复审
+- **遗留问题**：前端同步由 #18 跟踪；退款金额超过原单的告警与中性记录唯一冲突自愈未做（P3）

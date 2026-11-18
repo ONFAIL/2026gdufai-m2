@@ -57,6 +57,17 @@ insert({ date: '2026-11-14', direction: 'expense', amountCents: 1000, categoryId
 insert({ date: '2026-11-14', direction: 'income', amountCents: 800000, categoryId: 9 });
 insert({ date: '2026-12-02', direction: 'expense', amountCents: 500, categoryId: 3 });
 
+// 中性记录：保留但不计入 summary
+db.prepare(
+  `INSERT INTO transactions
+     (id, user_id, direction, direction_source, amount_cents, merchant, note, occurred_at, occurred_date,
+      time_source, chat_at, category_id, category_source, category_confidence, status, source_modality,
+      source_ref, anomaly_flag, idempotency_key, entry_type, matched_transaction_id, created_at, updated_at)
+   VALUES ('tx_extra_refund', ?, 'income', 'category', 500, '测试商户', '退款', '2026-11-20T12:00:00+08:00',
+           '2026-11-20', 'explicit', NULL, 11, 'fallback', 0.3, 'confirmed', 'text', NULL, 0, 'key_refund',
+           'refund', NULL, '2026-11-20T12:00:00+08:00', '2026-11-20T12:00:00+08:00')`
+).run(USER);
+
 afterAll(async () => {
   await app.close();
   db.close();
@@ -131,6 +142,23 @@ describe('账单一览补充用例', () => {
     expect(zero.statusCode).toBe(422);
     expect(tooLarge.statusCode).toBe(422);
     expect(zero.json()).toMatchObject({ error: { code: 'INVALID_QUERY_PARAM' } });
+  });
+
+  it('entryType=refund 时 items 有中性记录、summary 仍只算 normal', async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/transactions?entryType=refund' });
+    const body = response.json() as {
+      items: Array<{ entryType: string }>;
+      summary: { count: number };
+    };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]?.entryType).toBe('refund');
+    expect(body.summary.count).toBe(0);
+  });
+
+  it('entryType 非法值返回 422', async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/transactions?entryType=bogus' });
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toMatchObject({ error: { code: 'INVALID_QUERY_PARAM' } });
   });
 
   it('userId 查询参数不改变结果', async () => {

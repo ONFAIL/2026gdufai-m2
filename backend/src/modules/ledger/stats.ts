@@ -219,6 +219,15 @@ export function buildStats(db: Db, userId: string, query: StatsQuery): StatsResu
     )
     .all(...params) as AggregateRow[];
 
+  // isEmpty 表示「区间内是否有任何记录」（含中性记录）；summary.count 仍只算 normal。
+  const hasAnyRecord =
+    db
+      .prepare(
+        `SELECT 1 AS hit FROM transactions
+          WHERE user_id = ? AND status = 'confirmed' AND occurred_date BETWEEN ? AND ? LIMIT 1`
+      )
+      .get(userId, range.start, range.end) !== undefined;
+
   const categoryMeta = new Map<number, CategoryMeta>();
   const categoryRows = db
     .prepare('SELECT id, name, kind, color, is_preset FROM categories')
@@ -342,7 +351,7 @@ export function buildStats(db: Db, userId: string, query: StatsQuery): StatsResu
       unit: 'cent',
       basis: { dateField: 'occurred_date', timezone: 'Asia/Shanghai', includeVoid: false },
       generatedAt: nowIsoShanghai(),
-      isEmpty: summary.count === 0
+      isEmpty: !hasAnyRecord
     }
   };
 }

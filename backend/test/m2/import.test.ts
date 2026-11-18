@@ -187,7 +187,8 @@ describe('POST /api/transactions/import', () => {
     const item = refund.body.results[0];
     expect(item.status).toBe('confirmed');
     expect(item.matchedTransactionId).toBe(originalId);
-    expect(item.category).toMatchObject({ id: 8, name: '其他' });
+    expect(item.category).toMatchObject({ id: 11, name: '其他收入', kind: 'income' });
+    expect(item.direction).toBe('income');
     expect(item.feedback).toContainEqual({
       field: 'originalTransactionId',
       code: 'REFUND_RECORDED_NEUTRAL',
@@ -198,6 +199,60 @@ describe('POST /api/transactions/import', () => {
       await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11&userId=u1' })
     ).json().summary;
     expect(after).toEqual(before);
+  });
+
+  it('还款匹配到贷款账单：中性记录，方向为支出，不计收支', async () => {
+    const loan = await send([
+      record({ idempotencyKey: 'k-loan', rawText: '贷款 5000 到账', amount: 5000, merchant: '某银行' })
+    ]);
+    const loanId = loan.body.results[0].transactionId as string;
+    expect(loan.body.results[0].category).toMatchObject({ id: 12, name: '贷款' });
+
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const repayment = await send([
+      record({
+        idempotencyKey: 'k-repayment-matched',
+        rawText: '还款 500',
+        amount: 500,
+        originalTransactionId: loanId
+      })
+    ]);
+    const item = repayment.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.direction).toBe('expense');
+    expect(item.category).toMatchObject({ id: 8, name: '其他', kind: 'expense' });
+    expect(item.matchedTransactionId).toBe(loanId);
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'REPAYMENT_RECORDED_NEUTRAL',
+      severity: 'warning'
+    });
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after).toEqual(before);
+  });
+
+  it('中性记录重发：duplicate 保留 matchedTransactionId', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-dup-orig', rawText: '买书 100', amount: 100, merchant: '书店' })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    const payload = record({
+      idempotencyKey: 'k-dup-refund',
+      rawText: '退款 100',
+      amount: 100,
+      originalTransactionId: originalId
+    });
+
+    await send([payload]);
+    const again = await send([payload]);
+    expect(again.body.results[0].status).toBe('duplicate');
+    expect(again.body.results[0].matchedTransactionId).toBe(originalId);
   });
 
   it('退款没带原账单 id：首轮追问，次轮归入其他且不计收支', async () => {

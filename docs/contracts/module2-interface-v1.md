@@ -238,7 +238,7 @@
 - **金额字段全部是「分」**（`meta.unit = "cent"`），展示前除以 100。
 - `netCents = incomeCents - expenseCents`，可为负，**不要叫「余额」**。
 - `ratio` 分母是**同方向**合计：支出类别 ÷ `expenseCents`，收入类别 ÷ `incomeCents`。
-- `meta.isEmpty = true` 时回答「这个月还没有记录」，而不是「花了 0 元」。
+- `meta.isEmpty = true` 时回答「这个月还没有记录」，而不是「花了 0 元」。`meta.isEmpty` 只表示**区间内没有任何记录**（含退款/还款中性记录），因此可能与 `summary.count = 0` 同时出现「有记录但无收支」的情况。
 - 想回答「哪类花得最多」，直接读 `summary.topCategory`，不要遍历 `buckets` 自己排。
 
 ### 2.3 账单一览 `GET /api/transactions`
@@ -271,7 +271,7 @@
 ```
 
 - `summary` 是**整个筛选集**的合计，不是本页；
-- `summary` **恒只统计 `entry_type='normal'`** 的记录，中性记录只出现在 `items` 中；因此 `entryType=all` 或 `entryType=refund` 时，`summary.count` 可能小于 `items` 条数，金额字段也不含中性记录。
+- `summary` **恒只统计 `entry_type='normal'` 且满足 `entryType` 筛选**的记录，中性记录只出现在 `items` 中；因此 `entryType=all` 或 `entryType=refund` 时，`summary.count` 可能与 `items` 条数不一致，金额字段也不含中性记录。
 - 游标分页：把 `nextCursor` 原样回传，不要自己拼 `offset`。
 
 ### 2.4 类别字典 `GET /api/categories`
@@ -494,10 +494,11 @@ POST /api/transactions/tx_xxx/void
 
 ## 5. 变更与沟通约定
 
-1. 本文档对应 `contract v1.x`（当前 **v1.2**），**字段只增不删**；破坏性改动会提前在群里通知并升版本号。v1.2 的语义修正均不改变字段与端点形状，属澄清而非破坏性变更：
-   - `DUPLICATE_RECORD` 严重度由 `blocking` 改为 `warning`，与 §1.4「按成功处理」一致；
-   - `FUTURE_TIME` 增加 5 分钟时钟容差，把「未来」的判定边界写死；
-   - `occurredAt` 要求真实日历日期，拒绝 `2026-02-31` 这类 V8 会静默滚动的输入。
+1. 本文档对应 `contract v1.x`（当前 **v1.3**），**字段只增不删**；破坏性改动会提前在群里通知并升版本号。语义修正均不改变字段与端点形状，属澄清而非破坏性变更：
+   - v1.2：`DUPLICATE_RECORD` 严重度由 `blocking` 改为 `warning`，与 §1.4「按成功处理」一致；
+   - v1.2：`FUTURE_TIME` 增加 5 分钟时钟容差，把「未来」的判定边界写死；
+   - v1.2：`occurredAt` 要求真实日历日期，拒绝 `2026-02-31` 这类 V8 会静默滚动的输入；
+   - v1.3：退款/还款改为中性记录（`entry_type`），保留但不计入收支；移除 `REFUND_NOT_SUPPORTED`，新增 `ORIGINAL_NOT_FOUND` 等 4 个反馈码；`summary` 恒只统计 normal，`meta.isEmpty` 依据区间是否有任何记录。
 2. 模块 2 的实现在 `backend/` 下，接口以本文档为准；代码合并后如有差异，以代码为准并同步更新本文档。
 3. 模块 1 / 3 需要新增字段或接口（比如「按商户统计」），先在群里提，确认后由模块 2 加，**不要各自约定后直接改**。
 4. 联调问题优先带三样东西：`batchId` / `recordId` / 接口返回原文，方便直接查 `intake_log`。

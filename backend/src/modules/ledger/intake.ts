@@ -167,6 +167,8 @@ function insertNeutral(
     occurredAt: string;
     direction: Direction;
     category: CategoryRow | null;
+    timeSource: 'explicit' | 'chat_time';
+    chatAt: string | null;
   },
   extraFeedback: FeedbackItem[],
   matchedTransactionId: string | null
@@ -181,41 +183,42 @@ function insertNeutral(
 
   const transactionId = `tx_${randomUUID()}`;
   const nowIso = nowIsoShanghai();
-  const usedChatTime = record.occurredAt === null;
 
   db.transaction(() => {
     insertTransaction(db, {
-    id: transactionId,
-    userId: record.userId,
-    direction,
-    directionSource: record.direction !== null ? 'explicit' : 'category',
-    amountCents: resolved.amountCents,
-    merchant,
-    note: record.rawText,
-    occurredAt: resolved.occurredAt,
-    occurredDate: toShanghaiDate(resolved.occurredAt),
-    timeSource: usedChatTime ? 'chat_time' : 'explicit',
-    chatAt: usedChatTime ? resolved.occurredAt : null,
-    categoryId: category?.id ?? null,
-    categorySource: 'fallback',
-    categoryConfidence: 0.3,
-    sourceModality: record.modality,
-    sourceRef: record.sourceRef,
-    idempotencyKey: record.idempotencyKey,
-    createdAt: nowIso,
-    updatedAt: nowIso,
-    entryType: kind as 'refund' | 'repayment',
-    matchedTransactionId
-  });
+      id: transactionId,
+      userId: record.userId,
+      direction,
+      // 中性记录的方向由退款/还款类型决定，不来自原账单
+      directionSource: 'category',
+      amountCents: resolved.amountCents,
+      merchant,
+      note: record.rawText,
+      occurredAt: resolved.occurredAt,
+      occurredDate: toShanghaiDate(resolved.occurredAt),
+      timeSource: resolved.timeSource,
+      chatAt: resolved.chatAt,
+      categoryId: category?.id ?? null,
+      // 中性记录走兜底类别，不参与置信度提示
+      categorySource: 'fallback',
+      categoryConfidence: 0.3,
+      sourceModality: record.modality,
+      sourceRef: record.sourceRef,
+      idempotencyKey: record.idempotencyKey,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      entryType: kind as 'refund' | 'repayment',
+      matchedTransactionId
+    });
 
-  saveIntake(db, {
-    idempotencyKey: record.idempotencyKey,
-    recordId: record.recordId,
-    batchId: batch.batchId,
-    status: 'confirmed',
-    followupRound: round,
-    transactionId,
-    feedback
+    saveIntake(db, {
+      idempotencyKey: record.idempotencyKey,
+      recordId: record.recordId,
+      batchId: batch.batchId,
+      status: 'confirmed',
+      followupRound: round,
+      transactionId,
+      feedback
     });
   })();
 
@@ -239,10 +242,17 @@ function handleSpecialEntry(
   record: RawRecord,
   round: number,
   kind: SpecialEntry,
-  resolved: { amountCents: number; occurredAt: string; category: CategoryRow | null },
+  resolved: {
+    amountCents: number;
+    occurredAt: string;
+    category: CategoryRow | null;
+    timeSource: 'explicit' | 'chat_time';
+    chatAt: string | null;
+  },
   timeFeedback: FeedbackItem[],
   now: Date,
-  categories: CategoryRow[]
+  categories: CategoryRow[],
+  askedOriginal: boolean
 ): RecordResult {
   let matched: { id: string; direction: Direction } | null = null;
   if (record.originalTransactionId !== null) {
@@ -257,7 +267,8 @@ function handleSpecialEntry(
   }
 
   if (matched !== null) {
-    const direction = record.direction ?? matched.direction;
+    // 中性记录方向只由类型决定：退款 = 收入，还款 = 支出。
+    const direction: Direction = kind === 'refund' ? 'income' : 'expense';
     return insertNeutral(
       db,
       batch,
@@ -276,8 +287,8 @@ function handleSpecialEntry(
     );
   }
 
-  if (round === 0) {
-    // 没带 id 与「带了但没匹配上」是两类问题，需要不同的追问话术。
+  if (!askedOriginal) {
+    // 还没问过原账单：即使本轮不是首轮，也要先问，避免直接兜底。
     const code =
       record.originalTransactionId === null
         ? 'MISSING_ORIGINAL_TRANSACTION'
@@ -378,16 +389,21 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
   // 退款/还款：保留记录但不计入收支。
   const special = detectSpecialEntry(record.rawText);
   if (special !== null) {
+    const askedOriginal =
+      existing?.feedback.some(
+        (item) => item.code === 'MISSING_ORIGINAL_TRANSACTION' || item.code === 'ORIGINAL_NOT_FOUND'
+      ) ?? false;
     return handleSpecialEntry(
       db,
       batch,
       record,
       round,
       special,
-      { amountCents, occurredAt, category: resolvedCategory },
+      { amountCents, occurredAt, category: resolvedCategory, timeSource, chatAt },
       timeFeedback,
       now,
-      categories
+      categories,
+      askedOriginal
     );
   }
 
