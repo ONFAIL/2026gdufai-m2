@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { importBatch } from '../api/index';
+import { getDemoUserId } from '../api/request';
 import { useCategories } from '../composables/useCategories';
 import { feedbackText, type Direction, type ImportResultItem, type Modality } from '../types/contract';
 import { nowIso, toDatetimeLocal } from '../utils/datetime';
@@ -42,7 +43,7 @@ async function submitRecord(): Promise<void> {
       records: [
         {
           recordId,
-          userId: 'demo-user',
+          userId: getDemoUserId(),
           direction: direction.value,
           amount: amountYuan,
           merchant: null,

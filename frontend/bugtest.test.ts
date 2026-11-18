@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { getDemoUserId } from './src/api/request';
 import { mockImportBatch } from './src/mock/import';
 import { mockGetStats } from './src/mock/stats';
 import { mockListTransactions, mockGetBudgets, mockGetCategories } from './src/mock/db';
@@ -194,5 +195,20 @@ describe('响应形状', () => {
     const { HttpErrorCode } = await import('./src/types/contract').catch(() => ({ HttpErrorCode: null }));
     // 类型别名运行时不可见，仅需编译通过；此处仅确认无异常
     expect(true).toBe(true);
+  });
+});
+
+// ---------- 单用户身份 ----------
+describe('前端 userId 与 DEMO_USER_ID 对齐', () => {
+  it('未配置时默认 u_001', () => {
+    vi.stubEnv('VITE_DEMO_USER_ID', '');
+    expect(getDemoUserId()).toBe('u_001');
+    vi.unstubAllEnvs();
+  });
+
+  it('配置后按配置值返回', () => {
+    vi.stubEnv('VITE_DEMO_USER_ID', 'u_demo');
+    expect(getDemoUserId()).toBe('u_demo');
+    vi.unstubAllEnvs();
   });
 });
