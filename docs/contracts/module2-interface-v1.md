@@ -145,9 +145,9 @@
 | `TIME_DEFAULTED_TO_CHAT_TIME` | 时间追问不清，已回退聊天时间 | warning | 「时间我按你发消息的时间记了」 |
 | `DIRECTION_FORCED_BY_CATEGORY` | 冲突二次以类别为准 | warning | 「按类别记成了收入」 |
 | `DUPLICATE_RECORD` | 幂等键重复 | warning | 「这笔已经记过了」 |
-
-> `MISSING_DIRECTION` 的存废由 issue #12 决议；本轮契约保留该码，实现按其现有行为处理。
 | `REFUND_NOT_SUPPORTED` | 文本是退款/退货 | blocking | 「退款请到账单一览里作废原账单」 |
+
+> `MISSING_DIRECTION`：兜底到「其他」视为类别识别成功，**不返回该码**；该码保留但当前不可达，存废由 issue #12 决议。
 
 ### 1.6 追问轮次怎么算
 
@@ -399,8 +399,11 @@ DELETE /api/budgets/7
 
 ```jsonc
 PATCH /api/transactions/tx_xxx
-{ "categoryId": 3 }
-→ 200 { "id": "tx_xxx", "direction": "expense", "category": { "id": 3, "name": "购物" } }
+{ "categoryId": 3, "amountCents": 2500, "merchant": "某商户",
+  "occurredAt": "2026-11-14T12:00:00+08:00" }
+→ 200 { "id": "tx_xxx", "direction": "expense", "amountCents": 2500, "merchant": "某商户",
+        "occurredAt": "2026-11-14T12:00:00+08:00", "status": "confirmed",
+        "category": { "id": 3, "name": "购物" } }
 
 POST /api/transactions/tx_xxx/void
 { "reason": "退款" }
@@ -411,9 +414,9 @@ POST /api/transactions/tx_xxx/void
 
 | 字段 | 规则 |
 |---|---|
-| `categoryId` | 必须存在，否则 `404 CATEGORY_NOT_FOUND`；`kind` 与账单 `direction` 不一致返回 `409 CATEGORY_KIND_MISMATCH` |
+| `categoryId` | 必须存在，否则 `404 CATEGORY_NOT_FOUND`；允许改到另一侧 `kind`，此时按副作用翻转 `direction` 并重算预算 |
 | `amountCents` | 正整数（`> 0`），否则 `422 INVALID_QUERY_PARAM`（`field: amountCents`） |
-| `merchant` | 非空字符串，最长 100 字符；空串返回 `422 INVALID_QUERY_PARAM` |
+| `merchant` | 非空字符串，最长 100 字符；传 `null` 或空串返回 `422 INVALID_QUERY_PARAM`（不允许清空） |
 | `occurredAt` | 必须是真实日历日期且带时区偏移，否则 `422 INVALID_QUERY_PARAM`（`field: occurredAt`） |
 
 规则：
