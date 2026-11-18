@@ -3,17 +3,20 @@ import { buildApp } from '../../src/app.ts';
 import type { AppConfig } from '../../src/config/index.ts';
 import { openDatabase } from '../../src/db/client.ts';
 import { seedCategories } from '../../src/db/seed/categories.ts';
+import { seedDemoUser } from '../../src/db/seed/users.ts';
 
 const config: AppConfig = {
   port: 0,
   nodeEnv: 'test',
   databasePath: ':memory:',
   uploadDir: './uploads',
-  authToken: null
+  authToken: null,
+  demoUserId: 'u_001'
 };
 
 const db = openDatabase(':memory:');
 seedCategories(db);
+seedDemoUser(db, config.demoUserId);
 const app = buildApp({ config, db });
 
 afterAll(async () => {
@@ -26,7 +29,7 @@ const SENT_AT = '2026-11-15T21:00:00+08:00';
 function record(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     recordId: 'r1',
-    userId: 'u1',
+    userId: 'u_001',
     direction: null,
     amount: 32.5,
     merchant: null,
@@ -293,6 +296,14 @@ describe('POST /api/transactions/import', () => {
     expect(row).toEqual({ direction: 'income', direction_source: 'category' });
   });
 
+  it('入站 userId 与 DEMO_USER_ID 不一致时整批拒收', async () => {
+    const result = await send([record({ idempotencyKey: 'k-bad-user', userId: 'u_other' })]);
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({
+      error: { code: 'INVALID_BATCH', field: 'records[0].userId' }
+    });
+  });
+
   it('已落库但缺 intake 记录时自愈为 duplicate', async () => {
     const key = 'k-wedge';
     const before = transactionCount();
@@ -301,7 +312,7 @@ describe('POST /api/transactions/import', () => {
          (id, user_id, direction, direction_source, amount_cents, merchant, note, occurred_at, occurred_date,
           time_source, chat_at, category_id, category_source, category_confidence, status, source_modality,
           source_ref, anomaly_flag, idempotency_key, created_at, updated_at)
-       VALUES ('tx_wedge', 'u1', 'expense', 'explicit', 1000, '某商户', '历史账单',
+       VALUES ('tx_wedge', 'u_001', 'expense', 'explicit', 1000, '某商户', '历史账单',
                '2026-11-14T12:00:00+08:00', '2026-11-14', 'explicit', NULL, 1, 'rule', 0.9, 'confirmed',
                'text', NULL, 0, ?, '2026-11-14T12:00:00+08:00', '2026-11-14T12:00:00+08:00')`
     ).run(key);

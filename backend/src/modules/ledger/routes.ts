@@ -10,6 +10,16 @@ export async function registerLedgerRoutes(app: FastifyInstance): Promise<void> 
     if (!parsed.ok) {
       throw invalidBatch(parsed.message, parsed.field);
     }
+    // 契约 §0.1：单用户演示，入站 userId 必须等于 DEMO_USER_ID，否则整批拒收。
+    const mismatchIndex = parsed.batch.records.findIndex(
+      (item) => item.userId !== app.config.demoUserId
+    );
+    if (mismatchIndex !== -1) {
+      throw invalidBatch(
+        `records[${mismatchIndex}].userId 必须等于 DEMO_USER_ID`,
+        `records[${mismatchIndex}].userId`
+      );
+    }
     const result = processBatch(app.db, parsed.batch);
     return reply.status(201).send(result);
   });

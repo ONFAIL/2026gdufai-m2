@@ -4,7 +4,6 @@ import { yuanToCents } from '../../shared/money.ts';
 import { nowIsoShanghai, toShanghaiDate } from '../../shared/time.ts';
 import { classify } from './classifier.ts';
 import {
-  ensureUser,
   findIntake,
   findTransactionByIdempotencyKey,
   getTransactionView,
@@ -264,7 +263,6 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
   const transactionId = `tx_${randomUUID()}`;
   const nowIso = nowIsoShanghai();
 
-  ensureUser(db, record.userId);
   const transactionInput = {
     id: transactionId,
     userId: record.userId,

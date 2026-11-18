@@ -204,4 +204,25 @@
 - **人工审核**：待复审
 - **遗留问题**：`DEMO_USER_ID` 校验等 #11 合并后再补
 
+### LOG-Z_Wen-20261118-07
+
+- **时间**：2026-11-18 19:35（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-import-pipeline` / #9（对齐契约 v1.2）
+- **任务**：#11 合并后，按契约 v1.2 补单用户与鉴权、6 个错误码、贷款类别 12
+- **关键提示词**：issue #12 实现清单第 1–6 项；reviewer 要求 #9 对齐 v1.2 后再合并
+- **代理做了什么**：
+  - `config`：新增 `demoUserId`（`DEMO_USER_ID`，默认 `u_001`）；`app` 装饰 `config`
+  - `app`：新增 `onRequest` 鉴权钩子，`APP_AUTH_TOKEN` 已配置时校验 Bearer，失败返回 `UNAUTHORIZED`
+  - `routes`：导入前校验每条 `userId === DEMO_USER_ID`，否则整批 `INVALID_BATCH`（`field: records[i].userId`）
+  - `intake`：移除 `ensureUser`，不再按入站 userId 自动建用户；改由 `seedDemoUser` 在启动时预置
+  - `server.ts`：启动时 `seedDemoUser(db, config.demoUserId)`
+  - `errors`：补齐契约 §2.6 的 6 个码（`INVALID_QUERY_PARAM`、`CATEGORY_NAME_TAKEN`、`CATEGORY_PRESET_PROTECTED`、`CATEGORY_KIND_MISMATCH`、`BUDGET_NOT_FOUND`、`BUDGET_CONFLICT`）
+  - `categories` seed：新增 ID 12「贷款」（income）
+  - 测试：`db.test` 12/4/12；`classifier.test` 自定义类别 ID 改 13；新增 `auth.test` 3 例与 userId 不一致用例
+- **决策**：用户由服务端预置而非入站自动创建；鉴权只在配置了非占位 token 时生效
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 11 文件 **61 例**
+- **人工审核**：待复审
+- **遗留问题**：前端 mock/verify2 的贷款 12 属前端模块，需 @ 前端负责人同步；#10 待 rebase
+
 
