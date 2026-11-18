@@ -59,3 +59,90 @@
 - **验证**：复制仓库到全新目录 `D:\m2-fix-verify`（排除 node_modules/.git），`pnpm install --frozen-lockfile` 首次 exit 0，esbuild 两个版本 postinstall 均执行；该目录内 `pnpm -r typecheck/lint/test` 全绿（backend 15 例、frontend 31 例）
 - **人工审核**：采纳
 - **遗留问题**：契约变更 issue 待开；CI workflow（用户提供 `ci.yml`）建议单独 PR 提交
+
+### LOG-Z_Wen-20261117-06
+
+- **时间**：2026-11-17 21:55（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `docs/contract-v1.2` / #11
+- **任务**：按团队要求更新模块 2 契约到 v1.2（用户与鉴权、类别管理、预算写入、账单纠错），并按 reviewer 的 8 条意见修复 P2/P3
+- **关键提示词**：「团队目前要我更新一下接口协议，有关于受契约阻塞项与用户信息存储方案」；reviewer 结论 Request changes，要求先修 P2 契约与交付缺项
+- **代理做了什么**：
+  - 契约 v1.2：新增 §0.1 用户与鉴权（`DEMO_USER_ID` + 可选 Bearer）；§2.7 类别管理；§2.8 预算写入；§2.9 账单纠错；§2.6 增 `INVALID_QUERY_PARAM`；§3 增贷款类别 ID 12
+  - Review 修复：预算响应补 `id`（F1）；预算迁移冲突显式 `409 BUDGET_CONFLICT`（F2）；类别删除/迁移处理 `user_category_rules`（F3）；§2.6 登记 `CATEGORY_KIND_MISMATCH` 与预算错误码（F4）；自定义类别示例改 ID 13（F5）
+  - 同步 `docs/ARCHITECTURE.md`（类别 1–12、鉴权已定）、`docs/GLOSSARY.md`（12 个预设类别、贷款术语）、`.env.example`（`DEMO_USER_ID`）
+  - 本日志条目（S4）
+- **决策**：用户方案采用 A（单用户演示，固定 `DEMO_USER_ID`，入站 userId 必须一致）；预算迁移冲突不静默合并，返回 409 并给出双方预算 id；类别删除先清学习规则再删类别
+- **验证**：`git diff --check` 通过；契约内错误码引用与 §2.6 表逐项核对；本 PR 仅文档，无运行时代码变更
+- **人工审核**：Request changes → 已按意见修改，待复审
+- **遗留问题**：契约变更 issue 已创建（#12），编号已补入契约头部；实现代码在后续 PR 跟进
+
+### LOG-Z_Wen-20261117-07
+
+- **时间**：2026-11-17 22:25（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `docs/contract-v1.2` / #11（第二轮 review 修复）
+- **任务**：按第二轮 Request changes 修复 3 个部分修复项与 2 个新增 P2
+- **关键提示词**：reviewer 要求「解决剩余 P2，并同步配置文档与示例」，保持文档先行边界
+- **代理做了什么**：
+  - S3：README 增加「用户与鉴权变量」表，写明 `DEMO_USER_ID` / `APP_AUTH_TOKEN` 的默认值、用途与实现状态
+  - N1：GLOSSARY 贷款术语删除超出契约口径的「还款不计入收支」半句
+  - F2：§2.7 明确 reassign 的三类更新在同一事务内执行，任一失败整体回滚
+  - N2：§2.6 将 `CATEGORY_KIND_MISMATCH` 限定为 reassign，与 §2.9 的 direction 翻转约定区分
+  - 非阻塞：§2.6 的 `counts` 示例补 `rules`
+- **决策**：保持「文档先行、实现后补」；issue #12 的模块范围与知悉确认属仓库操作，需有权限的协作者补勾 M1/M3
+- **验证**：`git diff --check` 通过；契约错误码表与 §2.7/§2.9 约定逐条核对一致
+- **人工审核**：Request changes → 已修改，待第三轮复审
+- **遗留问题**：issue #12 需补选 M1/M3 受影响模块并勾选「受影响负责人已知悉」；实现 PR 待契约合并后开始
+
+### LOG-Z_Wen-20261118-01
+
+- **时间**：2026-11-18 16:00（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `docs/contract-v1.2` / #11（第三轮 review 修复 + 日志编号说明）
+- **任务**：按第三轮 review 修复 4 个 P1 缺口，并说明代理日志编号跳号原因
+- **关键提示词**：reviewer 第三轮 Request changes，要求合并前解决 4 个 P1 与若干 P2
+- **代理做了什么**：
+  - P1-1：§0.1 鉴权改为「为空或等于 `change-me` 视为未配置、开发模式放行」，与 `.env.example`、`config/index.ts` 的哨兵语义对齐，并注明生产必须设置非占位 token
+  - P1-2：§2.7 删除守卫写明 `counts.transactions` 含 `status='void'` 的作废账单，仅当三类计数全为 0 才允许删除；`reassign` 一并迁移作废账单
+  - P1-3：§2.8 规定 `alertThresholds` 为 1–200 整数、去重升序、最多 5 个、缺省 `[80,100]`，与 `budget_alerts.threshold` 的 CHECK 对齐
+  - P1-4：补齐 PATCH/DELETE/reassign 与 DELETE budgets 的请求体、响应体与成功码（204/200）
+  - P2：新增 `CATEGORY_NAME_TAKEN`(409)、`CATEGORY_PRESET_PROTECTED`(403)；`amountCents` 正整数校验；停用类别退出自动分类、reassign 目标须启用；`kind` 创建后不可变；§2.6 说明 `CATEGORY_KIND_MISMATCH` 两层语义独立
+  - N9：新增本条目说明编号跳号
+- **决策**：编号跳号原因——`LOG-Z_Wen-20261117-01` 写于已删除的 `feat/m2-import-validation` 分支（未进入任何合并分支）；`-05` 写于未合并的退款分支 `feat/m2-refund-neutral3`。按规范不改写历史，仅追加说明
+- **验证**：`git diff --check` 通过；契约错误码表、§2.7 计数规则、§2.8 阈值约束逐条核对；本 PR 仍为文档变更
+- **人工审核**：第三轮 Request changes → 已修改，待复审
+- **遗留问题**：`ErrorCode` 的 4 个新码（`INVALID_QUERY_PARAM` / `CATEGORY_NAME_TAKEN` / `CATEGORY_KIND_MISMATCH` / `BUDGET_CONFLICT`）与 `demoUserId` 配置由实现 PR 补齐；预设类别 11→12 的 7 项改动见 review C2 清单
+
+### LOG-Z_Wen-20261118-02
+
+- **时间**：2026-11-18 16:10（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `docs/contract-v1.2` / #11（补齐 reviewer 第 3 节契约决议）
+- **任务**：把 reviewer 在 issue #12 指出的 5 条未决契约决议写进 v1.2，避免合并后立刻出 v1.3
+- **关键提示词**：reviewer 列出「本 issue 仍需定稿的契约决议」，要求 #11 覆盖或明确处理
+- **代理做了什么**：
+  - §1.3：`occurredAt` 必须是真实日历日期，越界整批 `INVALID_BATCH`（对应 A1）
+  - §1.5：`FUTURE_TIME` 定义容差为「超过当前时间 5 分钟」；`DUPLICATE_RECORD` 严重度由 blocking 改为 warning，与 §1.4「按成功处理」一致
+  - §1.5：`feedback[]` 增加可选 `candidates`（最多 3 个，仅 `LOW_CONFIDENCE_CATEGORY`）
+  - §1.6：幂等重发时 `feedback` 原样返回，`intake_log` 保存完整 feedback 对象而非仅 code
+- **决策**：容差取 5 分钟（覆盖时钟偏差，避免把「刚发生」误判为未来）；candidates 上限 3，控制响应体大小
+- **验证**：`git diff --check` 通过；契约内引用与反馈码表逐条核对
+- **人工审核**：待第四轮复审
+- **遗留问题**：实现侧需同步——`intake.ts` 的未来判断由 24h 改为 5 分钟、`last_codes` 改存完整 feedback、`classify()` 返回候选、`validation.ts` 增加真实日期校验
+
+### LOG-Z_Wen-20261118-05
+
+- **时间**：2026-11-18 18:30（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `docs/contract-v1.2` / #11（复审收口）
+- **任务**：更正 `-01` 条目中「4 个新码」的口径，并修正 §2.7 删除规则的自相矛盾（本条按 review 要求移至 `-02` 之后）
+- **关键提示词**：reviewer 要求日志「4 个新码」改为 6 个；§2.7「删除时先删规则」与「rules 计数必须为 0」矛盾
+- **代理做了什么**：
+  - 更正：`ErrorCode` 实际新增 **6 个**码——`INVALID_QUERY_PARAM`、`CATEGORY_NAME_TAKEN`、`CATEGORY_PRESET_PROTECTED`、`CATEGORY_KIND_MISMATCH`、`BUDGET_NOT_FOUND`、`BUDGET_CONFLICT`；以契约 §2.6 为准
+  - 契约 §2.7：删除「删除时先删除 `user_category_rules`」一句，改为「`rules > 0` 同样 409；只有 `reassign` 迁移规则」
+  - `FUTURE_TIME` 容差保持 5 分钟不变（#9 已对齐）
+- **决策**：按日志规范不改写已提交的 `-01`，以本条目追加更正
+- **验证**：`git diff --check` 通过；§2.7 三条计数规则与删除/迁移语义逐条核对
+- **人工审核**：reviewer 要求收口，待复审
+- **遗留问题**：无

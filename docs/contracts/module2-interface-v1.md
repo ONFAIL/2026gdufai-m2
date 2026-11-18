@@ -1,7 +1,8 @@
 # 模块 2 接口交接文档
 
 > 适用对象：模块 1（语音/文字/图片记账）、模块 3（自然语言查账）、模块 4（预算提醒，同进程）
-> 文档版本：v1.1（新增 `INTERNAL_ERROR` 与错误响应可选 `details` 字段）
+> 文档版本：v1.2（新增用户与鉴权约定、类别管理/预算写入/账单纠错接口、贷款类别）
+> 冻结依据：contract-change issue #12；本版本仅新增契约，不含实现
 > 维护人：模块 2 负责人
 > 状态：接口定义已冻结；服务端实现按本文档开发中，联调前以本文档为准
 
@@ -17,6 +18,15 @@
 | 模块 4 | 预算 CRUD、超支判断、通知 | 账单入库、统计口径 |
 
 一句话：**模块 1 只给字段，模块 2 只给事实，模块 3 只负责说人话。**
+
+## 0.1 用户与鉴权（v1.2 新增）
+
+- 本期为**单用户演示**：服务端使用固定用户 `DEMO_USER_ID`（环境变量，默认 `u_001`）。
+- 入站记录的 `userId` 必须等于 `DEMO_USER_ID`，否则整批返回 `INVALID_BATCH`（`field: records[i].userId`）。
+- 读接口（统计、账单一览）不接受 `userId` 参数，统一读取 `DEMO_USER_ID`。
+- 鉴权：`APP_AUTH_TOKEN` **为空或等于占位值 `change-me`** 时视为未配置，按开发模式放行；否则所有 `/api/*` 请求必须携带 `Authorization: Bearer <token>`，缺失或不匹配返回 `UNAUTHORIZED`。**生产部署必须设置非占位值 token。**
+- 用户数据只存 `users(id, nickname, timezone, currency, created_at)`；`nickname` 默认等于 `userId`，**不存密码、邮箱、手机号等个人信息**。
+
 
 ---
 
@@ -65,9 +75,9 @@
 | `recordId` | 记录 | 是 | string | 模块 1 生成，批次内唯一 |
 | `userId` | 记录 | 是 | string | 当前用户 |
 | `direction` | 记录 | 否 | `"expense"` \| `"income"` \| `null` | 判断不了就传 `null`，**不要猜** |
-| `amount` | 记录 | 否 | number \| `null` | **单位：元**，最多两位小数；识别不出传 `null`，**不要传 0** |
+| `amount` | 记录 | 否 | number \| `null` | **单位：元**，最多两位小数；识别不出传 `null`，**不要传 0**。若传入 0 或负数，按缺失处理并返回 `MISSING_AMOUNT` |
 | `merchant` | 记录 | 否 | string \| `null` | 缺失传 `null`，不要传 `"未知"` |
-| `occurredAt` | 记录 | 否 | string \| `null` | 消费发生时间，ISO-8601；日期明确但时间不明可传当天 `T12:00:00+08:00` |
+| `occurredAt` | 记录 | 否 | string \| `null` | 消费发生时间，ISO-8601；日期明确但时间不明可传当天 `T12:00:00+08:00`。**必须是真实存在的日历日期**（如 `2026-02-31` 非法），越界或非法日期整批 `INVALID_BATCH`（`field: records[i].occurredAt`） |
 | `chatAt` | 记录 | 否 | string \| `null` | 该条消息本身发出的时刻；不传则用批次 `sentAt` 兜底 |
 | `rawText` | 记录 | 是 | string | 原始输入文本（语音转写结果也算） |
 | `modality` | 记录 | 是 | `"text"` \| `"voice"` \| `"image"` | 输入形态 |
@@ -75,7 +85,7 @@
 | `confidence` | 记录 | 否 | number 0–1 \| `null` | 模块 1 对整条抽取的置信度，仅作参考 |
 | `idempotencyKey` | 记录 | 是 | string | **同一笔重发必须相同**，模块 2 据此去重 |
 
-> **关于 `direction` 可以传 `null`**：`null` 只出现在**入站**，含义是「模块 1 没有判定」，不是脏数据。模块 2 收到后按优先级解析：类别能识别就用类别 kind 推断，推断不出就追问（`MISSING_DIRECTION`），因此 **`transactions.direction` 是非空字段，入库前方向必然已经确定**，不存在把 `null` 写进库的路径。
+> **关于 `direction` 可以传 `null`**：`null` 只出现在**入站**，含义是「模块 1 没有判定」，不是脏数据。模块 2 收到后按优先级解析：类别能识别就用类别 kind 推断；类别也识别不出时兜底到「其他」并按 `expense` 推断。`MISSING_DIRECTION` 保留但当前不可达（见 §1.5），因此 **`transactions.direction` 是非空字段，入库前方向必然已经确定**，不存在把 `null` 写进库的路径。
 >
 > 不让模块 1 强制填写方向，是因为它只能靠猜：猜错会直接污染预算与统计（支出一旦记成收入，当月超支判断就失效），而传 `null` 最多触发一次推断或追问，代价小得多。
 
@@ -115,30 +125,37 @@
 ```jsonc
 "feedback": [
   { "field": "amount", "code": "MISSING_AMOUNT", "severity": "blocking" },
-  { "field": "merchant", "code": "MERCHANT_DEFAULTED", "severity": "warning" }
+  { "field": "merchant", "code": "MERCHANT_DEFAULTED", "severity": "warning" },
+  { "field": "category", "code": "LOW_CONFIDENCE_CATEGORY", "severity": "warning",
+    "candidates": [ { "id": 1, "name": "餐饮" }, { "id": 3, "name": "购物" } ] }
 ]
 ```
+
+> `candidates` 为可选字段，最多 3 个，仅 `LOW_CONFIDENCE_CATEGORY` 携带；其余码不需要。
 
 | code | 触发条件 | 严重度 | 模块 1 建议话术（文案可改，语义别变） |
 |---|---|---|---|
 | `MISSING_AMOUNT` | 金额空/0/负 | blocking | 「这笔大概花了多少钱？」 |
 | `MISSING_TIME` | 时间缺失（首轮） | blocking | 「这是哪天的消费？」 |
-| `FUTURE_TIME` | 时间在未来（首轮） | blocking | 「这个时间是未来的，是不是记错了？」 |
+| `FUTURE_TIME` | 时间超过当前时间 **5 分钟**（容忍时钟偏差，首轮） | blocking | 「这个时间是未来的，是不是记错了？」 |
 | `MISSING_DIRECTION` | 方向和类别都判不出 | blocking | 「这笔是支出还是收入？」 |
 | `CATEGORY_KIND_MISMATCH` | 方向与类别冲突（首轮） | blocking | 「你说是支出，但类别是工资，以哪个为准？」 |
 | `LOW_CONFIDENCE_CATEGORY` | 分类置信度 < 0.75 | warning | 「我把它归到了其他，可以帮我选个类别吗？」（附 `candidates`） |
 | `MERCHANT_DEFAULTED` | 商户缺失 | warning | 「商户我填了未知账号，要补吗？」 |
 | `TIME_DEFAULTED_TO_CHAT_TIME` | 时间追问不清，已回退聊天时间 | warning | 「时间我按你发消息的时间记了」 |
 | `DIRECTION_FORCED_BY_CATEGORY` | 冲突二次以类别为准 | warning | 「按类别记成了收入」 |
-| `DUPLICATE_RECORD` | 幂等键重复 | blocking | 「这笔已经记过了」 |
+| `DUPLICATE_RECORD` | 幂等键重复 | warning | 「这笔已经记过了」 |
 | `REFUND_NOT_SUPPORTED` | 文本是退款/退货 | blocking | 「退款请到账单一览里作废原账单」 |
+
+> `MISSING_DIRECTION`：兜底到「其他」视为类别识别成功，**不返回该码**；该码保留但当前不可达，存废由 issue #12 决议。
 
 ### 1.6 追问轮次怎么算
 
 - 追问轮次由模块 2 用 `idempotencyKey` 维护（存数据库），**模块 1 不需要传轮次**。
 - 同一笔重发时：`idempotencyKey` 不变，已确认的字段填上，**未确认的字段继续传 `null`**。
 - 第 2 轮起，如果时间仍为空或在未来，模块 2 会用 `chatAt`（或批次 `sentAt`）兜底入库，并回 `TIME_DEFAULTED_TO_CHAT_TIME`。
-- 同一笔追问满 **3 轮** 仍无法解决，模块 2 返回 `rejected`，模块 1 提示用户手动补录。
+- 同一笔最多追问 **2 次**：第 1、2 次提交返回 `pending_followup`；第 3 次提交仍无法解决时返回 `rejected`，模块 1 提示用户手动补录。轮次由模块 2 按幂等键维护。
+- 幂等重发时，`feedback` **按原样返回**（保留 `field`、`severity` 与 `candidates`），不得只回 `code`；模块 2 需在 `intake_log` 中保存完整 feedback 对象。
 
 ### 1.7 模块 1 必须守的三条
 
@@ -256,7 +273,7 @@
 ### 2.5 预算状态 `GET /api/budgets?month=2026-11`（模块 4 提供）
 
 ```jsonc
-[ { "scope": "total", "category": null, "amountCents": 300000,
+[ { "id": 1, "scope": "total", "category": null, "amountCents": 300000,
     "spentCents": 268400, "remainingCents": 31600, "usageRatio": 0.895, "level": "near" } ]
 ```
 
@@ -272,8 +289,14 @@
 |---|---|---|
 | `INVALID_BATCH` | 400 | 批次缺必填字段 |
 | `INVALID_DIMENSION_PARAM` | 422 | dimension 与参数不匹配 |
+| `INVALID_QUERY_PARAM` | 422 | 查询参数非法（分页、筛选、游标等） |
 | `CATEGORY_NOT_FOUND` | 404 | 类别不存在 |
 | `CATEGORY_IN_USE` | 409 | 删除有数据的类别，返回 `counts` |
+| `CATEGORY_NAME_TAKEN` | 409 | 同一 `kind` 下类别重名 |
+| `CATEGORY_PRESET_PROTECTED` | 403 | 尝试删除预设类别 |
+| `CATEGORY_KIND_MISMATCH` | 409 | 迁移类别（`reassign`）时，目标类别 `kind` 与账单 `direction` 不一致 |
+| `BUDGET_NOT_FOUND` | 404 | 预算不存在 |
+| `BUDGET_CONFLICT` | 409 | 迁移预算时目标类别同月已有预算，`details` 返回冲突双方预算 id |
 | `UNAUTHORIZED` | 401 | 缺少/错误的鉴权头 |
 | `INTERNAL_ERROR` | 500 | 未捕获异常，返回通用错误信息 |
 
@@ -281,8 +304,126 @@
 >
 > ```jsonc
 > { "error": { "code": "CATEGORY_IN_USE", "message": "该类别下还有 12 笔账单", "field": "categoryId",
->              "details": { "counts": { "transactions": 12, "budgets": 1 } } } }
+>              "details": { "counts": { "transactions": 12, "budgets": 1, "rules": 3 } } } }
 > ```
+
+> `CATEGORY_KIND_MISMATCH` 同时存在于 §1.5（记录级反馈码，`blocking`）与本节（接口级错误码，409），二者分层独立，**不得互相替代**：入站冲突仍按 §1.5 返回反馈码，不得直接抛 409。
+
+---
+
+## 2.7 类别管理
+
+| 方法 | 路径 | 成功码 | 说明 |
+|---|---|---|---|
+| POST | `/api/categories` | 201 | 创建自定义类别 |
+| PATCH | `/api/categories/:id` | 200 | 改名 / 颜色 / 图标 / 关键词 / 停用 |
+| DELETE | `/api/categories/:id` | 204 | 删除自定义类别（无响应体） |
+| POST | `/api/categories/:id/reassign` | 200 | 批量迁移账单、预算与学习规则到目标类别 |
+
+```jsonc
+// 创建（ID 12 已被「贷款」占用，自定义类别从 13 起自增）
+POST /api/categories
+{ "name": "宠物", "kind": "expense", "color": "#0EA5E9", "icon": "🐱",
+  "keywords": ["狗粮", "猫粮"], "sortOrder": 20 }
+→ 201 { "id": 13, "name": "宠物", "kind": "expense", "color": "#0EA5E9",
+        "icon": "🐱", "isPreset": false, "isActive": true }
+
+// 修改：kind 创建后不可变，传 kind 返回 422
+PATCH /api/categories/13
+{ "name": "宠物开销", "color": "#0284C7", "isActive": false }
+→ 200 { "id": 13, "name": "宠物开销", "kind": "expense", "color": "#0284C7",
+        "icon": "🐱", "isPreset": false, "isActive": false }
+
+// 删除：成功 204 无响应体；有引用返回 409
+DELETE /api/categories/13
+→ 204
+→ 409 { "error": { "code": "CATEGORY_IN_USE", "message": "类别下还有账单", "field": "categoryId",
+                    "details": { "counts": { "transactions": 10, "budgets": 1, "rules": 3 } } } }
+
+// 迁移：账单、预算、学习规则一起迁到目标类别
+POST /api/categories/13/reassign
+{ "targetCategoryId": 5 }
+→ 200 { "targetCategoryId": 5, "movedTransactions": 12, "movedBudgets": 1, "movedRules": 3 }
+```
+
+规则：
+
+- 预设类别（`isPreset=true`）只能停用，删除返回 `403 CATEGORY_PRESET_PROTECTED`；
+- 同一 `kind` 下类别名唯一，重名返回 `409 CATEGORY_NAME_TAKEN`；
+- `PATCH` 不允许修改 `kind`：`kind` 创建后不可变，传入返回 `422 INVALID_QUERY_PARAM`（`field: kind`）；
+- 删除前统计三类引用：`counts.transactions` **包含 `status='void'` 的已作废账单**（作废只改状态，仍保留 `category_id` 引用）；`counts.budgets`、`counts.rules` 同样统计全部引用；
+- 仅当 `transactions`、`budgets`、`rules` 三项计数**全部为 0** 时才允许删除；否则返回 `409 CATEGORY_IN_USE` 并带 `counts`；
+- `rules > 0` 同样返回 `409 CATEGORY_IN_USE`；只有 `POST /reassign` 会迁移学习规则，删除不会清理规则；
+- `POST /reassign` 同时迁移 `transactions`（含已作废账单）、`budgets`、`user_category_rules`；
+- 迁移学习规则时，若目标类别已有同 `(user_id, pattern)` 规则，**保留目标规则并删除源规则**，`hit_count` 合并到目标规则，不返回冲突；
+- `reassign` 的目标类别必须存在且 `isActive=true`，不存在返回 `404 CATEGORY_NOT_FOUND`，已停用返回 `422 INVALID_QUERY_PARAM`；
+- 迁移时若目标类别在同一月份已有预算，返回 `409 BUDGET_CONFLICT`，`details` 给出 `{ sourceBudgetId, targetBudgetId, month }`，**不做静默合并**；
+- `reassign` 的 `targetCategoryId` 的 `kind` 必须与账单 `direction` 一致，否则返回 `409 CATEGORY_KIND_MISMATCH`；
+- `reassign` 的校验与三类更新（`transactions`、`budgets`、`user_category_rules`）在**同一个数据库事务**内执行；目标类别不存在、`kind` 冲突或预算冲突任一项失败时**整体回滚**，不允许出现部分迁移；
+- 停用类别（`isActive=false`）不再参与自动分类，历史账单仍正常展示；
+- 自定义类别与预设类别一样参与自动分类，`kind` 只能为 `expense` / `income`。
+
+## 2.8 预算写入
+
+| 方法 | 路径 | 成功码 | 说明 |
+|---|---|---|---|
+| PUT | `/api/budgets` | 200 | 新增或修改月度预算（幂等覆盖） |
+| DELETE | `/api/budgets/:id` | 204 | 删除预算（无响应体） |
+
+```jsonc
+PUT /api/budgets
+{ "month": "2026-11", "scope": "category", "categoryId": 1,
+  "amountCents": 100000, "alertThresholds": [80, 100] }
+→ 200 { "id": 7, "scope": "category", "category": { "id": 1, "name": "餐饮" },
+        "amountCents": 100000, "spentCents": 98000, "remainingCents": 2000,
+        "usageRatio": 0.98, "level": "near" }
+
+DELETE /api/budgets/7
+→ 204
+```
+
+规则：
+
+- `scope=total` 时 `categoryId` 必须为 `null`；`scope=category` 必须提供 `categoryId`，否则 `422 INVALID_QUERY_PARAM`；
+- `amountCents` 必须是**正整数**（单位分，且 > 0），非法返回 `422 INVALID_QUERY_PARAM`（`field: amountCents`）；
+- `alertThresholds` 为 **1–200 的整数数组**，去重后升序存储，最多 5 个，缺省 `[80, 100]`；越界、非整数或超过 5 个返回 `422 INVALID_QUERY_PARAM`（`field: alertThresholds`）。该范围与 `budget_alerts.threshold` 的 `CHECK (BETWEEN 1 AND 200)` 保持一致；
+- 同一 `(month, scope, categoryId)` 幂等覆盖，不产生重复预算，响应始终包含预算 `id`，供 `DELETE /api/budgets/:id` 使用；
+- 删除不存在的预算返回 `404 BUDGET_NOT_FOUND`；删除成功返回 `204` 无响应体。
+
+## 2.9 账单纠错
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| PATCH | `/api/transactions/:id` | 修改分类 / 金额 / 商户 / 时间 |
+| POST | `/api/transactions/:id/void` | 软作废（统计与预算排除） |
+
+```jsonc
+PATCH /api/transactions/tx_xxx
+{ "categoryId": 3, "amountCents": 2500, "merchant": "某商户",
+  "occurredAt": "2026-11-14T12:00:00+08:00" }
+→ 200 { "id": "tx_xxx", "direction": "expense", "amountCents": 2500, "merchant": "某商户",
+        "occurredAt": "2026-11-14T12:00:00+08:00", "status": "confirmed",
+        "category": { "id": 3, "name": "购物" } }
+
+POST /api/transactions/tx_xxx/void
+{ "reason": "退款" }
+→ 200 { "id": "tx_xxx", "status": "void" }
+```
+
+字段与校验：
+
+| 字段 | 规则 |
+|---|---|
+| `categoryId` | 必须存在，否则 `404 CATEGORY_NOT_FOUND`；允许改到另一侧 `kind`，此时按副作用翻转 `direction` 并重算预算 |
+| `amountCents` | 正整数（`> 0`），否则 `422 INVALID_QUERY_PARAM`（`field: amountCents`） |
+| `merchant` | 非空字符串，最长 100 字符；传 `null` 或空串返回 `422 INVALID_QUERY_PARAM`（不允许清空） |
+| `occurredAt` | 必须是真实日历日期且带时区偏移，否则 `422 INVALID_QUERY_PARAM`（`field: occurredAt`） |
+
+规则：
+
+- 仅 `status='confirmed'` 的账单可修改；已作废账单返回 `422 INVALID_QUERY_PARAM`（`field: status`）；
+- `void` 幂等：重复调用返回 `200` 与当前 `status='void'`，不重复写入学习规则；
+- 修改分类时写入 `user_category_rules`（下次同商户自动命中）；改到另一侧 `kind` 时翻转 `direction` 并重算当月预算；作废后该账单从统计与预算中排除，但记录保留。
 
 ---
 
@@ -308,8 +449,9 @@
 | 9 | 工资 | `#22C55E` | 工资、薪资、月薪、发薪、薪酬、奖金、年终奖、绩效、提成、兼职、外快、稿费、劳务 |
 | 10 | 转账 | `#F472B6` | 转账、收款、入账、红包、礼金、压岁钱 |
 | 11 | 其他收入 | `#9CA3AF` | 利息、分红、基金、股票、理财、收益、报销 |
+| 12 | 贷款 | `#0EA5E9` | 贷款、借款、借到、放款、下款、借钱 |
 
-> 口径说明：**转账计入收入**；**退款/退货不算收入**（返回 `REFUND_NOT_SUPPORTED`，引导作废原单）。
+> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/退货不算收入**（返回 `REFUND_NOT_SUPPORTED`，引导作废原单）。
 
 ---
 
@@ -325,6 +467,7 @@
 - [ ] 方向与类别冲突 → 首轮 `CATEGORY_KIND_MISMATCH`，第二轮按类别覆盖
 - [ ] 文本含「退款」→ `REFUND_NOT_SUPPORTED`
 - [ ] 缺 `sentAt` → 整批 `INVALID_BATCH`
+- [ ] 入站 `userId` 与 `DEMO_USER_ID` 不一致 → 整批 `INVALID_BATCH`
 
 模块 3 侧：
 
@@ -338,7 +481,10 @@
 
 ## 5. 变更与沟通约定
 
-1. 本文档对应 `contract v1`，**字段只增不删、语义不变**；破坏性改动会提前在群里通知并升版本号。
+1. 本文档对应 `contract v1.x`（当前 **v1.2**），**字段只增不删**；破坏性改动会提前在群里通知并升版本号。v1.2 的语义修正均不改变字段与端点形状，属澄清而非破坏性变更：
+   - `DUPLICATE_RECORD` 严重度由 `blocking` 改为 `warning`，与 §1.4「按成功处理」一致；
+   - `FUTURE_TIME` 增加 5 分钟时钟容差，把「未来」的判定边界写死；
+   - `occurredAt` 要求真实日历日期，拒绝 `2026-02-31` 这类 V8 会静默滚动的输入。
 2. 模块 2 的实现在 `backend/` 下，接口以本文档为准；代码合并后如有差异，以代码为准并同步更新本文档。
 3. 模块 1 / 3 需要新增字段或接口（比如「按商户统计」），先在群里提，确认后由模块 2 加，**不要各自约定后直接改**。
 4. 联调问题优先带三样东西：`batchId` / `recordId` / 接口返回原文，方便直接查 `intake_log`。
