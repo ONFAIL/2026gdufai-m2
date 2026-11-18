@@ -302,3 +302,22 @@
 - **人工审核**：待复审
 - **遗留问题**：PR 描述与标题需同步为 82 例、10 文件（实现文件）
 
+### LOG-Z_Wen-20261118-11
+
+- **时间**：2026-11-18 20:45（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / 退款中性记录
+- **任务**：#10 合并后把退款分支 rebase 到最新基线，契约升 v1.3 并解决冲突
+- **关键提示词**：用户确认 #10 已合并；reviewer 要求退款分支最后处理
+- **代理做了什么**：
+  - rebase 到本地 `feat/m2-query-api`（`21df5c0`，内容等于 main + #10），丢弃旧的导入/查询提交
+  - 契约升 **v1.3**：保留 main 的 v1.2 内容，叠加退款中性记录；删除 `REFUND_NOT_SUPPORTED`，新增 4 个反馈码；§3 与 §4 口径同步
+  - `intake.ts`：中性记录写入包进事务；`saveIntake` 改存完整 feedback；duplicate 返回补 `matchedTransactionId`
+  - `repository.ts`：同时保留 `findTransactionByIdempotencyKey` 与 `getTransactionById`
+  - 日志冲突按时间排序，双方条目全留
+  - GLOSSARY：退款/中性记录口径更新
+- **决策**：中性记录保留 `status=confirmed`，用 `entry_type` 排除统计；契约版本 v1.3
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **86 例**；`git diff --check` 无输出
+- **人工审核**：待开 PR 复审
+- **遗留问题**：前端 `contract.ts` 的反馈码需同步（移除 `REFUND_NOT_SUPPORTED`、新增 4 码）；前端无 `entryType` 显示
+
