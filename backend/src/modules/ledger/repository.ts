@@ -1,4 +1,5 @@
 import type { Db } from '../../db/client.ts';
+import { nowIsoShanghai } from '../../shared/time.ts';
 import type { CategoryRow, Direction, UserCategoryRule } from './types.ts';
 
 interface CategoryDbRow {
@@ -40,11 +41,18 @@ export function listUserRules(db: Db, userId: string): UserCategoryRule[] {
   return rows.map((row) => ({ pattern: row.pattern, categoryId: row.category_id }));
 }
 
+export interface StoredFeedback {
+  readonly field: string | null;
+  readonly code: string;
+  readonly severity: 'blocking' | 'warning';
+}
+
 export interface IntakeRow {
   readonly status: 'confirmed' | 'pending_followup' | 'rejected' | 'duplicate';
   readonly followupRound: number;
   readonly transactionId: string | null;
-  readonly codes: string[];
+  /** 完整 feedback（field/code/severity）；旧数据只存 code 时按 blocking/null 兜底。 */
+  readonly feedback: StoredFeedback[];
 }
 
 export interface TransactionInput {
@@ -80,7 +88,7 @@ export function ensureUser(db: Db, userId: string): void {
   db.prepare('INSERT OR IGNORE INTO users (id, nickname, created_at) VALUES (?, ?, ?)').run(
     userId,
     userId,
-    new Date().toISOString()
+    nowIsoShanghai()
   );
 }
 
@@ -97,11 +105,16 @@ export function findIntake(db: Db, idempotencyKey: string): IntakeRow | null {
   if (row === undefined) {
     return null;
   }
+  const raw = JSON.parse(row.last_codes) as Array<string | StoredFeedback>;
   return {
     status: row.status,
     followupRound: row.followup_round,
     transactionId: row.transaction_id,
-    codes: JSON.parse(row.last_codes) as string[]
+    feedback: raw.map((item) =>
+      typeof item === 'string'
+        ? { field: null, code: item, severity: 'blocking' as const }
+        : { field: item.field ?? null, code: item.code, severity: item.severity ?? 'blocking' }
+    )
   };
 }
 
@@ -115,10 +128,10 @@ export function saveIntake(
     status: IntakeRow['status'];
     followupRound: number;
     transactionId: string | null;
-    codes: string[];
+    feedback: StoredFeedback[];
   }
 ): void {
-  const now = new Date().toISOString();
+  const now = nowIsoShanghai();
   db.prepare(
     `INSERT INTO intake_log
        (idempotency_key, record_id, batch_id, status, followup_round, transaction_id, last_codes, created_at, updated_at)
@@ -136,7 +149,7 @@ export function saveIntake(
     input.status,
     input.followupRound,
     input.transactionId,
-    JSON.stringify(input.codes),
+    JSON.stringify(input.feedback),
     now,
     now
   );
@@ -171,6 +184,43 @@ export function insertTransaction(db: Db, input: TransactionInput): void {
     input.createdAt,
     input.updatedAt
   );
+}
+
+/** 按幂等键读取已落库的账单，用于唯一冲突自愈。 */
+export function findTransactionByIdempotencyKey(
+  db: Db,
+  idempotencyKey: string
+): (TransactionView & { id: string }) | null {
+  const row = db
+    .prepare(
+      `SELECT t.id, t.direction, t.occurred_at, c.id AS category_id, c.name AS category_name, c.kind AS category_kind
+         FROM transactions t
+         LEFT JOIN categories c ON c.id = t.category_id
+        WHERE t.idempotency_key = ?`
+    )
+    .get(idempotencyKey) as
+    | {
+        id: string;
+        direction: Direction;
+        occurred_at: string;
+        category_id: number | null;
+        category_name: string | null;
+        category_kind: Direction | null;
+      }
+    | undefined;
+
+  if (row === undefined) {
+    return null;
+  }
+  return {
+    id: row.id,
+    direction: row.direction,
+    occurredAt: row.occurred_at,
+    category:
+      row.category_id === null || row.category_name === null || row.category_kind === null
+        ? null
+        : { id: row.category_id, name: row.category_name, kind: row.category_kind }
+  };
 }
 
 /** 按 id 读取账单视图，用于幂等重复时回显已有结果。 */

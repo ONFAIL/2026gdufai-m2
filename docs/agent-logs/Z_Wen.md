@@ -152,6 +152,26 @@
 - **人工审核**：待第四轮复审
 - **遗留问题**：实现侧需同步——`intake.ts` 的未来判断由 24h 改为 5 分钟、`last_codes` 改存完整 feedback、`classify()` 返回候选、`validation.ts` 增加真实日期校验
 
+### LOG-Z_Wen-20261118-03
+
+- **时间**：2026-11-18 16:45（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-import-pipeline` / #9（按 review 修复）
+- **任务**：修复 #9 的 2 个 P0、2 个同批问题与 2 个加固项（严格按契约 v1.1）
+- **关键提示词**：reviewer 要求 A1/FIX-1 必修，FIX-3/FIX-4 同批，OPT-1/OPT-2 强烈建议；不新增错误码、不改契约
+- **代理做了什么**：
+  - A1：`validation.ts` 的 `isIsoTime` 改为按字面量校验年/月/日与时分秒、偏移范围，`Date.UTC` 回读比对，拦截 2 月 31 日与 24:00
+  - FIX-1：`isFuture` 容差由 24 小时改为 60 秒
+  - FIX-3：`intake_log.last_codes` 改存完整 feedback（field/code/severity）；`findIntake` 兼容旧字符串数据；rejected 回放原样返回
+  - FIX-4：新增 `directionSource` 变量，冲突强制分支记 `category`（审计记实际来源）
+  - OPT-1：`ensureUser.created_at`、`intake_log` 时间戳改用 `nowIsoShanghai()`
+  - OPT-2：账单与入站日志包在同一事务；捕获 `SQLITE_CONSTRAINT_UNIQUE` 时按幂等键回查并补写入站日志，返回 `duplicate`
+  - 测试：validation 15、import 14，backend 共 56 例（10 文件）
+- **决策**：容差取 60 秒只吸收时钟抖动；唯一冲突只处理 `SQLITE_CONSTRAINT_UNIQUE`，其他异常原样抛出；旧版 `last_codes`（仅 code）读取时按 `blocking/null` 兜底
+- **验证**：`pnpm --filter @gduf/backend typecheck / lint / test` 全绿，56 例；`git diff --check` 无输出
+- **人工审核**：Request changes → 已修改，待复审
+- **遗留问题**：FIX-2（`DUPLICATE_RECORD` severity）等 #12 定稿未动；reviewer 列出的「记录即可」项未修；`DEMO_USER_ID` 校验等 #11 合并后补
+
 ### LOG-Z_Wen-20261118-05
 
 - **时间**：2026-11-18 18:30（+08:00）
@@ -167,4 +187,5 @@
 - **验证**：`git diff --check` 通过；§2.7 三条计数规则与删除/迁移语义逐条核对
 - **人工审核**：reviewer 要求收口，待复审
 - **遗留问题**：无
+
 

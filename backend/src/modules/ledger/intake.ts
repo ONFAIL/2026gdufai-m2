@@ -6,6 +6,7 @@ import { classify } from './classifier.ts';
 import {
   ensureUser,
   findIntake,
+  findTransactionByIdempotencyKey,
   getTransactionView,
   listCategories,
   listUserRules,
@@ -79,8 +80,20 @@ function fallbackCategory(categories: readonly CategoryRow[], direction: Directi
   return categories.find((item) => item.kind === kind && item.name === name) ?? null;
 }
 
+/** 未来时间容差：仅吸收时钟抖动，不吸收业务语义。 */
+const FUTURE_TOLERANCE_MS = 60_000;
+
 function isFuture(iso: string, now: Date): boolean {
-  return Date.parse(iso) > now.getTime() + 24 * 60 * 60 * 1000;
+  return Date.parse(iso) > now.getTime() + FUTURE_TOLERANCE_MS;
+}
+
+/** 判断是否为幂等键唯一冲突（SQLite 错误码）。 */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE'
+  );
 }
 
 function rejectedResult(record: RawRecord, codes: FeedbackItem[]): RecordResult {
@@ -111,7 +124,7 @@ function persistPending(
     status: rejected ? 'rejected' : 'pending_followup',
     followupRound: round,
     transactionId: null,
-    codes: feedback.map((item) => item.code)
+    feedback
   });
   const result = rejected
     ? rejectedResult(record, feedback)
@@ -147,7 +160,14 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
   }
 
   if (existing !== null && existing.status === 'rejected') {
-    return rejectedResult(record, existing.codes.map((code) => blocking(null, code as FeedbackCode)));
+    return rejectedResult(
+      record,
+      existing.feedback.map((item) => ({
+        field: item.field,
+        code: item.code as FeedbackCode,
+        severity: item.severity
+      }))
+    );
   }
 
   // 追问轮次用尽后不再反复询问，直接放弃，避免死循环。
@@ -206,6 +226,7 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
 
   const feedback: FeedbackItem[] = [...timeFeedback];
   let direction: Direction;
+  let directionSource: 'explicit' | 'category' = record.direction !== null ? 'explicit' : 'category';
 
   if (record.direction !== null && category !== null && category.kind !== record.direction) {
     if (round === 0) {
@@ -214,6 +235,7 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
       ]);
     }
     direction = category.kind;
+    directionSource = 'category';
     feedback.push(warning('direction', 'DIRECTION_FORCED_BY_CATEGORY'));
   } else if (record.direction !== null) {
     direction = record.direction;
@@ -243,11 +265,11 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
   const nowIso = nowIsoShanghai();
 
   ensureUser(db, record.userId);
-  insertTransaction(db, {
+  const transactionInput = {
     id: transactionId,
     userId: record.userId,
     direction,
-    directionSource: record.direction !== null ? 'explicit' : 'category',
+    directionSource,
     amountCents,
     merchant,
     note: record.rawText,
@@ -263,17 +285,49 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
     idempotencyKey: record.idempotencyKey,
     createdAt: nowIso,
     updatedAt: nowIso
-  });
-
-  saveIntake(db, {
+  };
+  const intakeInput = {
     idempotencyKey: record.idempotencyKey,
     recordId: record.recordId,
     batchId: batch.batchId,
-    status: 'confirmed',
+    status: 'confirmed' as const,
     followupRound: round,
     transactionId,
-    codes: feedback.map((item) => item.code)
-  });
+    feedback
+  };
+
+  try {
+    // 记录级原子性：账单与入站日志同事务提交，避免只写一半造成幂等键卡死。
+    db.transaction(() => {
+      insertTransaction(db, transactionInput);
+      saveIntake(db, intakeInput);
+    })();
+  } catch (error) {
+    // 唯一冲突自愈：已存在同幂等键的账单时补写入站日志并返回 duplicate。
+    if (isUniqueViolation(error)) {
+      const existingTransaction = findTransactionByIdempotencyKey(db, record.idempotencyKey);
+      if (existingTransaction !== null) {
+        const duplicateFeedback = [warning(null, 'DUPLICATE_RECORD')];
+        saveIntake(db, {
+          ...intakeInput,
+          status: 'confirmed',
+          transactionId: existingTransaction.id,
+          feedback: duplicateFeedback
+        });
+        return {
+          recordId: record.recordId,
+          status: 'duplicate',
+          transactionId: existingTransaction.id,
+          direction: existingTransaction.direction,
+          occurredAt: existingTransaction.occurredAt,
+          category: existingTransaction.category,
+          confidence: null,
+          feedback: duplicateFeedback
+        };
+      }
+    }
+    throw error;
+  }
 
   return {
     recordId: record.recordId,

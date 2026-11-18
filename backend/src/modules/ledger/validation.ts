@@ -1,8 +1,9 @@
-﻿import type { Modality, RawBatch, RawRecord } from './types.ts';
+import type { Modality, RawBatch, RawRecord } from './types.ts';
 
 const MODALITIES: readonly Modality[] = ['text', 'voice', 'image'];
 const DIRECTIONS = ['expense', 'income'] as const;
-const ISO_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
+const ISO_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/;
 const MAX_RECORDS = 100;
 
 export type ParseResult =
@@ -17,9 +18,42 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== '';
 }
 
-/** 只接受带时区偏移的 ISO-8601，避免把本地时间当成 UTC。 */
+/** 校验年/月/日是否为真实存在的日历日期（V8 会把 2 月 31 日滚动到 3 月）。 */
+function isRealCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) {
+    return false;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() + 1 === month && date.getUTCDate() === day
+  );
+}
+
+/**
+ * 只接受带时区偏移的 ISO-8601，并逐字段校验范围。
+ * Date.parse 对 2 月 31 日、24:00 等非法字面量会静默滚动，因此必须按字面量校验。
+ */
 function isIsoTime(value: unknown): value is string {
-  return typeof value === 'string' && ISO_PATTERN.test(value) && !Number.isNaN(Date.parse(value));
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const match = ISO_PATTERN.exec(value);
+  if (match === null) {
+    return false;
+  }
+  const [, year, month, day, hour, minute, second, , , , offsetHour, offsetMinute] = match;
+  const numbers = [year, month, day, hour, minute, second].map((part) => Number(part));
+  const [y, mo, d, h, mi, s] = numbers as [number, number, number, number, number, number];
+  if (!isRealCalendarDate(y, mo, d)) {
+    return false;
+  }
+  if (h > 23 || mi > 59 || s > 59) {
+    return false;
+  }
+  if (offsetHour !== undefined && (Number(offsetHour) > 23 || Number(offsetMinute) > 59)) {
+    return false;
+  }
+  return !Number.isNaN(Date.parse(value));
 }
 
 /** 金额必须是有限数字且最多两位小数；非法金额属于模块 1 的字段错误。 */

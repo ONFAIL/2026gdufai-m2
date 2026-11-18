@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { parseBatch } from '../../src/modules/ledger/validation.ts';
 
 const baseRecord = {
@@ -93,6 +93,25 @@ describe('parseBatch', () => {
   it('occurredAt 无时区拒收', () => {
     const result = parseBatch(withRecord({ occurredAt: '2026-11-14T09:12:00' }));
     expect(result).toMatchObject({ ok: false, field: 'records[0].occurredAt' });
+  });
+
+  it('非法日历日期与 24:00 拒收', () => {
+    const invalid = [
+      '2026-02-31T12:00:00+08:00',
+      '2026-04-31T12:00:00+08:00',
+      '2025-02-29T12:00:00+08:00',
+      '2026-01-01T24:00:00+08:00'
+    ];
+    for (const occurredAt of invalid) {
+      expect(parseBatch(withRecord({ occurredAt }))).toMatchObject({
+        ok: false,
+        field: 'records[0].occurredAt'
+      });
+    }
+  });
+
+  it('闰年 2 月 29 日合法', () => {
+    expect(parseBatch(withRecord({ occurredAt: '2024-02-29T12:00:00+08:00' })).ok).toBe(true);
   });
 
   it('超过 100 条拒收', () => {

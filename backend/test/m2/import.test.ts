@@ -211,4 +211,83 @@ describe('POST /api/transactions/import', () => {
     expect(round4.body.results[0].status).toBe('rejected');
     expect(transactionCount()).toBe(before);
   });
+
+  it('近未来（+2 小时）首轮追问 FUTURE_TIME，次轮按聊天时间兜底', async () => {
+    const key = 'k-near-future';
+    const twoHoursLater = new Date(Date.now() + 2 * 60 * 60 * 1000)
+      .toISOString()
+      .replace(/\.\d{3}Z$/, '+00:00');
+
+    const first = await send([record({ idempotencyKey: key, occurredAt: twoHoursLater })]);
+    expect(first.body.results[0].status).toBe('pending_followup');
+    expect(first.body.results[0].feedback).toContainEqual({
+      field: 'occurredAt',
+      code: 'FUTURE_TIME',
+      severity: 'blocking'
+    });
+
+    const second = await send([record({ idempotencyKey: key, occurredAt: twoHoursLater })]);
+    expect(second.body.results[0].status).toBe('confirmed');
+    expect(second.body.results[0].occurredAt).toBe(SENT_AT);
+  });
+
+  it('rejected 重发时保留原 feedback 的 field 与 severity', async () => {
+    const key = 'k-refund-replay';
+    const payload = record({ idempotencyKey: key, rawText: '退款 32.5', amount: 32.5 });
+
+    const first = await send([payload]);
+    expect(first.body.results[0].status).toBe('rejected');
+    expect(first.body.results[0].feedback[0]).toMatchObject({ field: 'rawText', severity: 'blocking' });
+
+    const second = await send([payload]);
+    expect(second.body.results[0].feedback[0]).toMatchObject({
+      field: 'rawText',
+      code: 'REFUND_NOT_SUPPORTED',
+      severity: 'blocking'
+    });
+  });
+
+  it('冲突强制分支的 direction_source 记为 category', async () => {
+    const key = 'k-forced-source';
+    const payload = record({
+      idempotencyKey: key,
+      direction: 'expense',
+      amount: 5000,
+      rawText: '工资 5000'
+    });
+
+    await send([payload]);
+    const second = await send([payload]);
+    const item = second.body.results[0];
+    expect(item.status).toBe('confirmed');
+
+    const row = db
+      .prepare('SELECT direction, direction_source FROM transactions WHERE id = ?')
+      .get(item.transactionId) as { direction: string; direction_source: string };
+    expect(row).toEqual({ direction: 'income', direction_source: 'category' });
+  });
+
+  it('已落库但缺 intake 记录时自愈为 duplicate', async () => {
+    const key = 'k-wedge';
+    const before = transactionCount();
+    db.prepare(
+      `INSERT INTO transactions
+         (id, user_id, direction, direction_source, amount_cents, merchant, note, occurred_at, occurred_date,
+          time_source, chat_at, category_id, category_source, category_confidence, status, source_modality,
+          source_ref, anomaly_flag, idempotency_key, created_at, updated_at)
+       VALUES ('tx_wedge', 'u1', 'expense', 'explicit', 1000, '某商户', '历史账单',
+               '2026-11-14T12:00:00+08:00', '2026-11-14', 'explicit', NULL, 1, 'rule', 0.9, 'confirmed',
+               'text', NULL, 0, ?, '2026-11-14T12:00:00+08:00', '2026-11-14T12:00:00+08:00')`
+    ).run(key);
+
+    const response = await send([record({ idempotencyKey: key, amount: 10, rawText: '瑞幸 10' })]);
+    expect(response.body.results[0].status).toBe('duplicate');
+    expect(response.body.results[0].transactionId).toBe('tx_wedge');
+    expect(transactionCount()).toBe(before + 1);
+
+    const intake = db.prepare('SELECT status FROM intake_log WHERE idempotency_key = ?').get(key) as {
+      status: string;
+    };
+    expect(intake.status).toBe('confirmed');
+  });
 });
