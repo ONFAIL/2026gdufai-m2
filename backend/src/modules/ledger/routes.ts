@@ -1,9 +1,65 @@
 import type { FastifyInstance } from 'fastify';
+import { AppError } from '../../shared/errors.ts';
 import { invalidBatch } from '../../shared/errors.ts';
 import { processBatch } from './intake.ts';
+import { buildStats, type StatsDirection, type StatsDimension, type StatsOrder } from './stats.ts';
+import { listTransactions, type TransactionListQuery } from './transactions.ts';
+import { listCategoryItems } from './repository.ts';
 import { parseBatch } from './validation.ts';
 
-/** 注册 M2 导入路由：接收模块 1 的批次 JSON 并逐条返回处理结果。 */
+function invalid(message: string): never {
+  throw new AppError('INVALID_QUERY_PARAM', 422, message);
+}
+
+function firstValue(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value) && typeof value[0] === 'string') {
+    return value[0];
+  }
+  return undefined;
+}
+
+function parseDimension(value: string | undefined): StatsDimension {
+  if (value === 'day' || value === 'month' || value === 'year' || value === 'recent7') {
+    return value;
+  }
+  return invalid('dimension 必须是 day / month / year / recent7');
+}
+
+function parseDirection(value: string | undefined): StatsDirection {
+  if (value === undefined) {
+    return 'all';
+  }
+  if (value === 'all' || value === 'expense' || value === 'income') {
+    return value;
+  }
+  return invalid('direction 必须是 all / expense / income');
+}
+
+function parseOrder(value: string | undefined): StatsOrder {
+  if (value === undefined) {
+    return 'asc';
+  }
+  if (value === 'asc' || value === 'desc') {
+    return value;
+  }
+  return invalid('order 必须是 asc / desc');
+}
+
+function parseCategoryIds(value: string | undefined): number[] | undefined {
+  if (value === undefined || value === '') {
+    return undefined;
+  }
+  const parts = value.split(',').map((item) => Number(item.trim()));
+  if (parts.some((item) => !Number.isInteger(item) || item <= 0)) {
+    return invalid('categoryIds 必须是逗号分隔的正整数');
+  }
+  return parts;
+}
+
+/** 注册 M2 的读取路由：类别字典、统计与账单一览。 */
 export async function registerLedgerRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/transactions/import', async (request, reply) => {
     const parsed = parseBatch(request.body);
@@ -22,5 +78,56 @@ export async function registerLedgerRoutes(app: FastifyInstance): Promise<void> 
     }
     const result = processBatch(app.db, parsed.batch);
     return reply.status(201).send(result);
+  });
+
+  app.get('/api/categories', async (_request, reply) => {
+    return reply.send(listCategoryItems(app.db));
+  });
+
+  app.get('/api/stats', async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const breakdownBy = firstValue(query.breakdownBy);
+    if (breakdownBy !== undefined && breakdownBy !== 'category') {
+      invalid('breakdownBy 目前只支持 category');
+    }
+    const result = buildStats(app.db, app.config.demoUserId, {
+      dimension: parseDimension(firstValue(query.dimension)),
+      date: firstValue(query.date),
+      month: firstValue(query.month),
+      year: firstValue(query.year),
+      breakdownBy: breakdownBy === 'category' ? 'category' : undefined,
+      direction: parseDirection(firstValue(query.direction)),
+      categoryIds: parseCategoryIds(firstValue(query.categoryIds)),
+      order: parseOrder(firstValue(query.order))
+    });
+    return reply.send(result);
+  });
+
+  app.get('/api/transactions', async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const categoryIdText = firstValue(query.categoryId);
+    const limitText = firstValue(query.limit);
+    const directionText = firstValue(query.direction);
+
+    const listQuery: TransactionListQuery = {
+      categoryId: categoryIdText === undefined ? undefined : Number(categoryIdText),
+      from: firstValue(query.from),
+      to: firstValue(query.to),
+      direction:
+        directionText === undefined
+          ? undefined
+          : directionText === 'expense' || directionText === 'income'
+            ? directionText
+            : invalid('direction 必须是 expense / income'),
+      limit: limitText === undefined ? undefined : Number(limitText),
+      cursor: firstValue(query.cursor)
+    };
+    if (listQuery.categoryId !== undefined && (!Number.isInteger(listQuery.categoryId) || listQuery.categoryId <= 0)) {
+      invalid('categoryId 必须是正整数');
+    }
+    if (listQuery.limit !== undefined && !Number.isInteger(listQuery.limit)) {
+      invalid('limit 必须是整数');
+    }
+    return reply.send(listTransactions(app.db, app.config.demoUserId, listQuery));
   });
 }

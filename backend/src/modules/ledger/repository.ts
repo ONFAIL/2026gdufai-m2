@@ -83,15 +83,6 @@ export interface TransactionView {
   readonly category: { id: number; name: string; kind: Direction } | null;
 }
 
-/** 确保用户存在，避免 transactions 外键失败。演示阶段用户由入站数据携带。 */
-export function ensureUser(db: Db, userId: string): void {
-  db.prepare('INSERT OR IGNORE INTO users (id, nickname, created_at) VALUES (?, ?, ?)').run(
-    userId,
-    userId,
-    nowIsoShanghai()
-  );
-}
-
 /** 查询幂等键对应的入站记录。 */
 export function findIntake(db: Db, idempotencyKey: string): IntakeRow | null {
   const row = db
@@ -224,8 +215,7 @@ export function findTransactionByIdempotencyKey(
 }
 
 /** 按 id 读取账单视图，用于幂等重复时回显已有结果。 */
-export function getTransactionView(db: Db, transactionId: string): TransactionView | null {
-  const row = db
+export function getTransactionView(db: Db, transactionId: string): TransactionView | null {  const row = db
     .prepare(
       `SELECT t.direction, t.occurred_at, c.id AS category_id, c.name AS category_name, c.kind AS category_kind
          FROM transactions t
@@ -253,4 +243,41 @@ export function getTransactionView(db: Db, transactionId: string): TransactionVi
         ? null
         : { id: row.category_id, name: row.category_name, kind: row.category_kind }
   };
+}
+
+export interface CategoryItem {
+  readonly id: number;
+  readonly name: string;
+  readonly kind: Direction;
+  readonly color: string;
+  readonly icon: string;
+  readonly isPreset: boolean;
+  readonly isActive: boolean;
+}
+
+/** 类别字典（契约 §2.4），包含停用类别以便前端展示历史账单。 */
+export function listCategoryItems(db: Db): CategoryItem[] {
+  const rows = db
+    .prepare(
+      'SELECT id, name, kind, color, icon, is_preset, is_active FROM categories ORDER BY sort_order, id'
+    )
+    .all() as Array<{
+    id: number;
+    name: string;
+    kind: Direction;
+    color: string;
+    icon: string;
+    is_preset: number;
+    is_active: number;
+  }>;
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    color: row.color,
+    icon: row.icon,
+    isPreset: row.is_preset === 1,
+    isActive: row.is_active === 1
+  }));
 }

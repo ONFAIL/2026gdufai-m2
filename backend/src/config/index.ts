@@ -7,7 +7,7 @@ export interface AppConfig {
   readonly databasePath: string;
   readonly uploadDir: string;
   readonly authToken: string | null;
-  /** 单用户演示的唯一用户；入站 userId 必须与之一致。 */
+  /** 单用户演示的唯一用户；入站 userId 必须与之一致，读接口不接受 userId。 */
   readonly demoUserId: string;
 }
 

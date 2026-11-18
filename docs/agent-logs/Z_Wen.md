@@ -225,4 +225,59 @@
 - **人工审核**：待复审
 - **遗留问题**：前端 mock/verify2 的贷款 12 属前端模块，需 @ 前端负责人同步；#10 待 rebase
 
+### LOG-Z_Wen-20261117-04
 
+- **时间**：2026-11-17 20:50（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-query-api` / 待建
+- **任务**：实现统计、账单一览与类别字典三个读取接口（契约 §2.2 / §2.3 / §2.4）
+- **关键提示词**：继续完成 M2 剩余部分；统计口径严格按契约 2.2
+- **代理做了什么**：
+  - `modules/ledger/stats.ts`：day/month/year/recent7、类别拆分、收支净额、topCategory、维度参数校验
+  - `modules/ledger/transactions.ts`：游标分页（base64url `date|id`）、筛选、整集 summary、`meta.isEmpty`
+  - `repository.ts` 追加 `listCategoryItems`
+  - `routes.ts` 注册三个 GET 接口
+  - 测试：stats 6、transactions 5、categories 1
+- **决策**：
+  - 统计桶包含 `netCents`（契约字段），即使前端类型暂未声明
+  - 参数错误统一用 `INVALID_DIMENSION_PARAM`(422) 返回，因为契约 §2.6 没有专门的查询参数错误码（已知缺口，后续可走契约变更）
+  - 类别字典返回全部类别（含停用），由前端按 `isActive` 过滤，保证历史账单可展示
+- **验证**：`pnpm --filter @gduf/backend typecheck / lint / test` 全绿，59 个用例通过（新增 12 例）
+- **人工审核**：采纳
+- **遗留问题**：契约缺类别 CRUD、预算写入、账单作废；M4 预算提醒未开始
+
+### LOG-Z_Wen-20261118-04
+
+- **时间**：2026-11-18 17:00（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-query-api` / #10（按 review 修复并 rebase）
+- **任务**：修复查询接口的 P1/P2；在 #9 合入 main 后 rebase，丢弃重复的导入提交
+- **关键提示词**：reviewer 指出 `userId` 可越权读他人数据、merge-base 过时、`topCategory` 语义待定、契约 §4 用例缺失
+- **代理做了什么**：
+  - `git rebase --onto main b008046`：丢弃与 #9 重复的导入提交 `b008046`；冲突 `app.ts`、`config/index.ts`、`Z_Wen.md` 均保留 #9 的 Bearer 鉴权与 `demoUserId` 实现
+  - `routes.ts`：读接口统一取 `app.config.demoUserId`，不接受 `userId` 查询参数；入站 `userId` 不一致整批 `INVALID_BATCH`
+  - `stats.ts`：`dimension=day` 用真实日历校验（`2026-02-31` → 422）；`topCategory` 按当前方向取最高，`direction=all` 时取支出侧，ratio 用同方向分母
+  - 错误码分层：分页 / 筛选 / 游标非法改用 `INVALID_QUERY_PARAM`；dimension 与参数不匹配保留 `INVALID_DIMENSION_PARAM`
+  - `categories.test`：预设类别断言更新为 12 个（income 4 个）
+  - 新增 `query-extra.test.ts`（9 例）：混合收支 ratio、income topCategory、空月份 isEmpty、userId 参数不改变结果、非法日期、同日游标翻页、非法 cursor、limit 越界
+- **决策**：`topCategory` 语义定为「当前方向最高类别，all 时支出侧」；查询参数类错误统一 `INVALID_QUERY_PARAM`，维度与参数不匹配才用 `INVALID_DIMENSION_PARAM`
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **82 例**；frontend 31 例；`git diff --check` 无输出
+- **人工审核**：Request changes → 已修改，待 rebase 后复审
+- **遗留问题**：PR 描述与标题需同步；前端 `StatsView` 切 day/month/year 时未传对应参数，需前端配套
+
+### LOG-Z_Wen-20261118-10
+
+- **时间**：2026-11-18 20:20（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-query-api` / #10（采用 reviewer 的 rebase 结果）
+- **任务**：按 reviewer 提供的 `fix/pr10-rebase` 更新分支，并补回该版本缺少的清理与断言
+- **关键提示词**：reviewer 已完成 rebase，要求 `git push --force-with-lease origin FETCH_HEAD:feat/m2-query-api`
+- **代理做了什么**：
+  - 采纳 `upstream/fix/pr10-rebase`（`f3ae641`）作为分支基线，强制推送到复刻
+  - 补回 `repository.ensureUser` 删除（该版本仍保留死代码）
+  - 补回 `categories.test` 的 ID 12「贷款」断言
+  - 补回 `query-extra.test` 对 `error.code === INVALID_QUERY_PARAM` 的断言
+- **决策**：以 reviewer 的 rebase 结果为准，差异以单个追加提交补齐，不重写其提交
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **82 例**；`git diff --check` 无输出
+- **人工审核**：待复审
+- **遗留问题**：PR 描述与标题需同步为 82 例、10 文件（实现文件）
