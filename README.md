@@ -52,8 +52,9 @@ docker compose up --build
 
 | 变量 | 默认值 | 用途 | 实现状态 |
 |---|---|---|---|
-| `DEMO_USER_ID` | `u_001` | 单用户演示的唯一用户；入站记录的 `userId` 必须与之一致，否则整批 `INVALID_BATCH` | 契约 v1.2 已定义，服务端校验待后续 PR 实现 |
-| `APP_AUTH_TOKEN` | `change-me` | Bearer 鉴权令牌；为空或 `change-me` 时按开发模式放行 | 同上，鉴权钩子待实现 |
+| `DEMO_USER_ID` | `u_001` | 单用户演示的唯一用户；入站记录的 `userId` 必须与之一致，否则整批 `INVALID_BATCH` | 已实现（服务端校验 + 前端 `VITE_DEMO_USER_ID`） |
+| `APP_AUTH_TOKEN` | `change-me` | Bearer 鉴权令牌；为空或 `change-me` 时按开发模式放行 | 已实现（`/api/*` Bearer 校验） |
+| `VITE_DEMO_USER_ID` | `u_001` | 前端构建期变量；必须与 `DEMO_USER_ID` 相同 | 已实现（未配置时按 `u_001`） |
 
 #### 已有数据卷出现权限错误
 

@@ -32,6 +32,15 @@ export function isMockEnabled(): boolean {
   return import.meta.env.VITE_USE_MOCK !== 'false';
 }
 
+/**
+ * 前端使用的单用户身份，必须与服务端 `DEMO_USER_ID` 一致。
+ * 构建期变量；未配置时与服务端默认值 `u_001` 对齐。
+ */
+export function getDemoUserId(): string {
+  const configured = import.meta.env.VITE_DEMO_USER_ID?.trim();
+  return configured === undefined || configured === '' ? 'u_001' : configured;
+}
+
 export interface RequestConfig extends RequestInit {
   expectArray?: boolean;
 }
