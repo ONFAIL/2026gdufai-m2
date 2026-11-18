@@ -75,7 +75,7 @@
 | `recordId` | 记录 | 是 | string | 模块 1 生成，批次内唯一 |
 | `userId` | 记录 | 是 | string | 当前用户 |
 | `direction` | 记录 | 否 | `"expense"` \| `"income"` \| `null` | 判断不了就传 `null`，**不要猜** |
-| `amount` | 记录 | 否 | number \| `null` | **单位：元**，最多两位小数；识别不出传 `null`，**不要传 0** |
+| `amount` | 记录 | 否 | number \| `null` | **单位：元**，最多两位小数；识别不出传 `null`，**不要传 0**。若传入 0 或负数，按缺失处理并返回 `MISSING_AMOUNT` |
 | `merchant` | 记录 | 否 | string \| `null` | 缺失传 `null`，不要传 `"未知"` |
 | `occurredAt` | 记录 | 否 | string \| `null` | 消费发生时间，ISO-8601；日期明确但时间不明可传当天 `T12:00:00+08:00`。**必须是真实存在的日历日期**（如 `2026-02-31` 非法），越界或非法日期整批 `INVALID_BATCH`（`field: records[i].occurredAt`） |
 | `chatAt` | 记录 | 否 | string \| `null` | 该条消息本身发出的时刻；不传则用批次 `sentAt` 兜底 |
@@ -145,6 +145,8 @@
 | `TIME_DEFAULTED_TO_CHAT_TIME` | 时间追问不清，已回退聊天时间 | warning | 「时间我按你发消息的时间记了」 |
 | `DIRECTION_FORCED_BY_CATEGORY` | 冲突二次以类别为准 | warning | 「按类别记成了收入」 |
 | `DUPLICATE_RECORD` | 幂等键重复 | warning | 「这笔已经记过了」 |
+
+> `MISSING_DIRECTION` 的存废由 issue #12 决议；本轮契约保留该码，实现按其现有行为处理。
 | `REFUND_NOT_SUPPORTED` | 文本是退款/退货 | blocking | 「退款请到账单一览里作废原账单」 |
 
 ### 1.6 追问轮次怎么算
@@ -152,7 +154,7 @@
 - 追问轮次由模块 2 用 `idempotencyKey` 维护（存数据库），**模块 1 不需要传轮次**。
 - 同一笔重发时：`idempotencyKey` 不变，已确认的字段填上，**未确认的字段继续传 `null`**。
 - 第 2 轮起，如果时间仍为空或在未来，模块 2 会用 `chatAt`（或批次 `sentAt`）兜底入库，并回 `TIME_DEFAULTED_TO_CHAT_TIME`。
-- 同一笔追问满 **3 轮** 仍无法解决，模块 2 返回 `rejected`，模块 1 提示用户手动补录。
+- 同一笔最多追问 **2 次**：第 1、2 次提交返回 `pending_followup`；第 3 次提交仍无法解决时返回 `rejected`，模块 1 提示用户手动补录。轮次由模块 2 按幂等键维护。
 - 幂等重发时，`feedback` **按原样返回**（保留 `field`、`severity` 与 `candidates`），不得只回 `code`；模块 2 需在 `intake_log` 中保存完整 feedback 对象。
 
 ### 1.7 模块 1 必须守的三条
@@ -353,6 +355,7 @@ POST /api/categories/13/reassign
 - 仅当 `transactions`、`budgets`、`rules` 三项计数**全部为 0** 时才允许删除；否则返回 `409 CATEGORY_IN_USE` 并带 `counts`；
 - `rules > 0` 同样返回 `409 CATEGORY_IN_USE`；只有 `POST /reassign` 会迁移学习规则，删除不会清理规则；
 - `POST /reassign` 同时迁移 `transactions`（含已作废账单）、`budgets`、`user_category_rules`；
+- 迁移学习规则时，若目标类别已有同 `(user_id, pattern)` 规则，**保留目标规则并删除源规则**，`hit_count` 合并到目标规则，不返回冲突；
 - `reassign` 的目标类别必须存在且 `isActive=true`，不存在返回 `404 CATEGORY_NOT_FOUND`，已停用返回 `422 INVALID_QUERY_PARAM`；
 - 迁移时若目标类别在同一月份已有预算，返回 `409 BUDGET_CONFLICT`，`details` 给出 `{ sourceBudgetId, targetBudgetId, month }`，**不做静默合并**；
 - `reassign` 的 `targetCategoryId` 的 `kind` 必须与账单 `direction` 一致，否则返回 `409 CATEGORY_KIND_MISMATCH`；
@@ -404,7 +407,20 @@ POST /api/transactions/tx_xxx/void
 → 200 { "id": "tx_xxx", "status": "void" }
 ```
 
-副作用约定：改分类时写入 `user_category_rules`（下次同商户自动命中）；改到另一侧 `kind` 时翻转 `direction` 并重算当月预算；作废后该账单从统计与预算中排除，但记录保留。
+字段与校验：
+
+| 字段 | 规则 |
+|---|---|
+| `categoryId` | 必须存在，否则 `404 CATEGORY_NOT_FOUND`；`kind` 与账单 `direction` 不一致返回 `409 CATEGORY_KIND_MISMATCH` |
+| `amountCents` | 正整数（`> 0`），否则 `422 INVALID_QUERY_PARAM`（`field: amountCents`） |
+| `merchant` | 非空字符串，最长 100 字符；空串返回 `422 INVALID_QUERY_PARAM` |
+| `occurredAt` | 必须是真实日历日期且带时区偏移，否则 `422 INVALID_QUERY_PARAM`（`field: occurredAt`） |
+
+规则：
+
+- 仅 `status='confirmed'` 的账单可修改；已作废账单返回 `422 INVALID_QUERY_PARAM`（`field: status`）；
+- `void` 幂等：重复调用返回 `200` 与当前 `status='void'`，不重复写入学习规则；
+- 修改分类时写入 `user_category_rules`（下次同商户自动命中）；改到另一侧 `kind` 时翻转 `direction` 并重算当月预算；作废后该账单从统计与预算中排除，但记录保留。
 
 ---
 
@@ -462,7 +478,10 @@ POST /api/transactions/tx_xxx/void
 
 ## 5. 变更与沟通约定
 
-1. 本文档对应 `contract v1.x`（当前 **v1.2**），**字段只增不删、语义不变**；破坏性改动会提前在群里通知并升版本号。
+1. 本文档对应 `contract v1.x`（当前 **v1.2**），**字段只增不删**；破坏性改动会提前在群里通知并升版本号。v1.2 的语义修正均不改变字段与端点形状，属澄清而非破坏性变更：
+   - `DUPLICATE_RECORD` 严重度由 `blocking` 改为 `warning`，与 §1.4「按成功处理」一致；
+   - `FUTURE_TIME` 增加 5 分钟时钟容差，把「未来」的判定边界写死；
+   - `occurredAt` 要求真实日历日期，拒绝 `2026-02-31` 这类 V8 会静默滚动的输入。
 2. 模块 2 的实现在 `backend/` 下，接口以本文档为准；代码合并后如有差异，以代码为准并同步更新本文档。
 3. 模块 1 / 3 需要新增字段或接口（比如「按商户统计」），先在群里提，确认后由模块 2 加，**不要各自约定后直接改**。
 4. 联调问题优先带三样东西：`batchId` / `recordId` / 接口返回原文，方便直接查 `intake_log`。
