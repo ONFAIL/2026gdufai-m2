@@ -11,7 +11,7 @@ export interface SeedCategory {
   readonly keywords: readonly string[];
 }
 
-/** 契约第 3 节冻结的 11 个预设类别，ID 固定不可变。 */
+/** 契约第 3 节冻结的 12 个预设类别，ID 固定不可变。 */
 export const PRESET_CATEGORIES: readonly SeedCategory[] = [
   { id: 1, name: '餐饮', kind: 'expense', color: '#F97316', icon: '🍜', sortOrder: 1,
     keywords: ['早餐', '午餐', '晚餐', '夜宵', '外卖', '餐厅', '饭店', '食堂', '咖啡', '奶茶', '瑞幸', '星巴克', '麦当劳', '肯德基', '火锅', '烧烤', '聚餐', 'AA'] },
@@ -33,7 +33,9 @@ export const PRESET_CATEGORIES: readonly SeedCategory[] = [
   { id: 10, name: '转账', kind: 'income', color: '#F472B6', icon: '🔁', sortOrder: 10,
     keywords: ['转账', '收款', '入账', '红包', '礼金', '压岁钱'] },
   { id: 11, name: '其他收入', kind: 'income', color: '#9CA3AF', icon: '➕', sortOrder: 11,
-    keywords: ['利息', '分红', '基金', '股票', '理财', '收益', '报销'] }
+    keywords: ['利息', '分红', '基金', '股票', '理财', '收益', '报销'] },
+  { id: 12, name: '贷款', kind: 'income', color: '#0EA5E9', icon: '🏦', sortOrder: 12,
+    keywords: ['贷款', '借款', '借到', '放款', '下款', '借钱'] }
 ];
 
 /** 幂等写入预设类别：已存在则跳过，不覆盖用户改过的颜色或关键词。 */

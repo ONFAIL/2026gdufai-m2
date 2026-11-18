@@ -7,6 +7,8 @@ export interface AppConfig {
   readonly databasePath: string;
   readonly uploadDir: string;
   readonly authToken: string | null;
+  /** 单用户演示的唯一用户；入站 userId 必须与之一致。 */
+  readonly demoUserId: string;
 }
 
 function readPositiveInt(value: string | undefined, fallback: number, name: string): number {
@@ -26,11 +28,13 @@ function readPositiveInt(value: string | undefined, fallback: number, name: stri
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const authToken = env.APP_AUTH_TOKEN;
+  const demoUserId = env.DEMO_USER_ID?.trim();
   return {
     port: readPositiveInt(env.PORT, 3000, 'PORT'),
     nodeEnv: env.NODE_ENV ?? 'development',
     databasePath: resolve(env.DATABASE_PATH ?? './data/app.db'),
     uploadDir: resolve(env.UPLOAD_DIR ?? './uploads'),
-    authToken: authToken && authToken !== 'change-me' ? authToken : null
+    authToken: authToken && authToken !== 'change-me' ? authToken : null,
+    demoUserId: demoUserId !== undefined && demoUserId !== '' ? demoUserId : 'u_001'
   };
 }

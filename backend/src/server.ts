@@ -2,6 +2,7 @@ import { buildApp } from './app.ts';
 import { loadConfig } from './config/index.ts';
 import { openDatabase } from './db/client.ts';
 import { seedCategories } from './db/seed/categories.ts';
+import { seedDemoUser } from './db/seed/users.ts';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { registerFrontend } from './frontend.ts';
@@ -9,6 +10,7 @@ import { registerFrontend } from './frontend.ts';
 const config = loadConfig();
 const db = openDatabase(config.databasePath);
 seedCategories(db);
+seedDemoUser(db, config.demoUserId);
 
 const app = buildApp({ config, db });
 const frontendRoot = fileURLToPath(new URL('../../frontend/dist/', import.meta.url));

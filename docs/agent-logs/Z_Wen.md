@@ -60,6 +60,27 @@
 - **人工审核**：采纳
 - **遗留问题**：契约变更 issue 待开；CI workflow（用户提供 `ci.yml`）建议单独 PR 提交
 
+### LOG-Z_Wen-20261117-03
+
+- **时间**：2026-11-17 20:30（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-import-pipeline` / 待建
+- **任务**：实现导入链路：批次校验、规则分类、追问状态机、入库与 `POST /api/transactions/import`
+- **关键提示词**：「完成 M2 剩下的部分」；按契约 §1 与 §4 联调清单实现
+- **代理做了什么**：
+  - `modules/ledger/{types,validation,classifier,repository,intent,intake,routes}.ts`
+  - `app.ts` 注册 ledger 路由
+  - 测试：validation 13、classifier 7、intent 2、import 10（契约 §4 八条联调用例全覆盖）
+- **决策**：
+  - 分类先按全类别匹配再判冲突，避免「方向过滤」让冲突永远检测不到
+  - 追问上限按「第 3 次提交转 rejected」实现（前端 mock 同口径），rejected 后不再复活
+  - 时间回退取 `chatAt ?? batch.sentAt`，并写 `time_source=chat_time`
+  - 用户表按入站 `userId` 自动补建，保证 `transactions.user_id` 外键成立
+- **验证**：`pnpm --filter @gduf/backend typecheck / lint / test` 全绿，47 个用例通过
+- **排查记录**：`intake.ts` 的 `existing.codes.map` 触发 `TS2345`（string 不能赋给 FeedbackCode），加类型断言修复
+- **人工审核**：采纳
+- **遗留问题**：统计、账单一览、类别字典接口未实现；预算提醒属 M4
+
 ### LOG-Z_Wen-20261117-06
 
 - **时间**：2026-11-17 21:55（+08:00）
@@ -131,6 +152,27 @@
 - **人工审核**：待第四轮复审
 - **遗留问题**：实现侧需同步——`intake.ts` 的未来判断由 24h 改为 5 分钟、`last_codes` 改存完整 feedback、`classify()` 返回候选、`validation.ts` 增加真实日期校验
 
+
+### LOG-Z_Wen-20261118-03
+
+- **时间**：2026-11-18 16:45（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-import-pipeline` / #9（按 review 修复）
+- **任务**：修复 #9 的 2 个 P0、2 个同批问题与 2 个加固项（严格按契约 v1.1）
+- **关键提示词**：reviewer 要求 A1/FIX-1 必修，FIX-3/FIX-4 同批，OPT-1/OPT-2 强烈建议；不新增错误码、不改契约
+- **代理做了什么**：
+  - A1：`validation.ts` 的 `isIsoTime` 改为按字面量校验年/月/日与时分秒、偏移范围，`Date.UTC` 回读比对，拦截 2 月 31 日与 24:00
+  - FIX-1：`isFuture` 容差由 24 小时改为 60 秒
+  - FIX-3：`intake_log.last_codes` 改存完整 feedback（field/code/severity）；`findIntake` 兼容旧字符串数据；rejected 回放原样返回
+  - FIX-4：新增 `directionSource` 变量，冲突强制分支记 `category`（审计记实际来源）
+  - OPT-1：`ensureUser.created_at`、`intake_log` 时间戳改用 `nowIsoShanghai()`
+  - OPT-2：账单与入站日志包在同一事务；捕获 `SQLITE_CONSTRAINT_UNIQUE` 时按幂等键回查并补写入站日志，返回 `duplicate`
+  - 测试：validation 15、import 14，backend 共 56 例（10 文件）
+- **决策**：容差取 60 秒只吸收时钟抖动；唯一冲突只处理 `SQLITE_CONSTRAINT_UNIQUE`，其他异常原样抛出；旧版 `last_codes`（仅 code）读取时按 `blocking/null` 兜底
+- **验证**：`pnpm --filter @gduf/backend typecheck / lint / test` 全绿，56 例；`git diff --check` 无输出
+- **人工审核**：Request changes → 已修改，待复审
+- **遗留问题**：FIX-2（`DUPLICATE_RECORD` severity）等 #12 定稿未动；reviewer 列出的「记录即可」项未修；`DEMO_USER_ID` 校验等 #11 合并后补
+
 ### LOG-Z_Wen-20261118-05
 
 - **时间**：2026-11-18 18:30（+08:00）
@@ -146,3 +188,41 @@
 - **验证**：`git diff --check` 通过；§2.7 三条计数规则与删除/迁移语义逐条核对
 - **人工审核**：reviewer 要求收口，待复审
 - **遗留问题**：无
+
+### LOG-Z_Wen-20261118-06
+
+- **时间**：2026-11-18 18:45（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-import-pipeline` / #9（与契约 v1.2 对齐）
+- **任务**：把 `FUTURE_TIME` 容差从 60 秒对齐到契约的 5 分钟，并补边界用例
+- **关键提示词**：reviewer 指出契约 5 分钟与 #9 代码 60 秒不一致，合并前必须统一
+- **代理做了什么**：
+  - `intake.ts`：`FUTURE_TOLERANCE_MS` 由 `60_000` 改为 `5 * 60_000`
+  - `import.test.ts`：新增「5 分钟容差内（+1 分钟）不判未来，超过容差（+6 分钟）判未来」
+- **决策**：以契约 §1.5 的 5 分钟为准，代码向契约对齐
+- **验证**：`typecheck` / `test` 通过，backend 10 文件 **57 例**
+- **人工审核**：待复审
+- **遗留问题**：`DEMO_USER_ID` 校验等 #11 合并后再补
+
+### LOG-Z_Wen-20261118-07
+
+- **时间**：2026-11-18 19:35（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-import-pipeline` / #9（对齐契约 v1.2）
+- **任务**：#11 合并后，按契约 v1.2 补单用户与鉴权、6 个错误码、贷款类别 12
+- **关键提示词**：issue #12 实现清单第 1–6 项；reviewer 要求 #9 对齐 v1.2 后再合并
+- **代理做了什么**：
+  - `config`：新增 `demoUserId`（`DEMO_USER_ID`，默认 `u_001`）；`app` 装饰 `config`
+  - `app`：新增 `onRequest` 鉴权钩子，`APP_AUTH_TOKEN` 已配置时校验 Bearer，失败返回 `UNAUTHORIZED`
+  - `routes`：导入前校验每条 `userId === DEMO_USER_ID`，否则整批 `INVALID_BATCH`（`field: records[i].userId`）
+  - `intake`：移除 `ensureUser`，不再按入站 userId 自动建用户；改由 `seedDemoUser` 在启动时预置
+  - `server.ts`：启动时 `seedDemoUser(db, config.demoUserId)`
+  - `errors`：补齐契约 §2.6 的 6 个码（`INVALID_QUERY_PARAM`、`CATEGORY_NAME_TAKEN`、`CATEGORY_PRESET_PROTECTED`、`CATEGORY_KIND_MISMATCH`、`BUDGET_NOT_FOUND`、`BUDGET_CONFLICT`）
+  - `categories` seed：新增 ID 12「贷款」（income）
+  - 测试：`db.test` 12/4/12；`classifier.test` 自定义类别 ID 改 13；新增 `auth.test` 3 例与 userId 不一致用例
+- **决策**：用户由服务端预置而非入站自动创建；鉴权只在配置了非占位 token 时生效
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 11 文件 **61 例**
+- **人工审核**：待复审
+- **遗留问题**：前端 mock/verify2 的贷款 12 属前端模块，需 @ 前端负责人同步；#10 待 rebase
+
+

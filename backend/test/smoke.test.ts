@@ -8,7 +8,8 @@ const config: AppConfig = {
   nodeEnv: 'test',
   databasePath: ':memory:',
   uploadDir: './uploads',
-  authToken: null
+  authToken: null,
+  demoUserId: 'u_001'
 };
 
 describe('app 工厂', () => {

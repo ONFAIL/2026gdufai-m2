@@ -30,7 +30,7 @@ describe('数据库迁移与种子', () => {
     db.close();
   });
 
-  it('种子写入 11 个预设类别，支出 8 / 收入 3', () => {
+  it('种子写入 12 个预设类别，支出 8 / 收入 4', () => {
     const db = openDatabase(':memory:');
     seedCategories(db);
     const row = db
@@ -38,10 +38,10 @@ describe('数据库迁移与种子', () => {
         "SELECT COUNT(*) AS total, SUM(kind = 'expense') AS expense, SUM(kind = 'income') AS income FROM categories WHERE is_preset = 1"
       )
       .get() as { total: number; expense: number; income: number };
-    expect(row.total).toBe(11);
+    expect(row.total).toBe(12);
     expect(row.expense).toBe(8);
-    expect(row.income).toBe(3);
-    expect(PRESET_CATEGORIES).toHaveLength(11);
+    expect(row.income).toBe(4);
+    expect(PRESET_CATEGORIES).toHaveLength(12);
     db.close();
   });
 
