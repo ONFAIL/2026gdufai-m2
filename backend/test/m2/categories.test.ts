@@ -33,5 +33,6 @@ describe('GET /api/categories', () => {
     expect(items.filter((item) => item.kind === 'income')).toHaveLength(4);
     expect(items.every((item) => item.isPreset)).toBe(true);
     expect(items[0]).toMatchObject({ id: 1, color: '#F97316' });
+    expect(items.find((item) => item.id === 12)).toMatchObject({ name: '贷款', kind: 'income' });
   });
 });

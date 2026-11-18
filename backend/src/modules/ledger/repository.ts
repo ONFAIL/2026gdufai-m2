@@ -83,15 +83,6 @@ export interface TransactionView {
   readonly category: { id: number; name: string; kind: Direction } | null;
 }
 
-/** 确保用户存在，避免 transactions 外键失败。演示阶段用户由入站数据携带。 */
-export function ensureUser(db: Db, userId: string): void {
-  db.prepare('INSERT OR IGNORE INTO users (id, nickname, created_at) VALUES (?, ?, ?)').run(
-    userId,
-    userId,
-    nowIsoShanghai()
-  );
-}
-
 /** 查询幂等键对应的入站记录。 */
 export function findIntake(db: Db, idempotencyKey: string): IntakeRow | null {
   const row = db

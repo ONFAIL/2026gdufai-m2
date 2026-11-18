@@ -264,3 +264,20 @@
 - **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **82 例**；frontend 31 例；`git diff --check` 无输出
 - **人工审核**：Request changes → 已修改，待 rebase 后复审
 - **遗留问题**：PR 描述与标题需同步；前端 `StatsView` 切 day/month/year 时未传对应参数，需前端配套
+
+### LOG-Z_Wen-20261118-10
+
+- **时间**：2026-11-18 20:20（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-query-api` / #10（采用 reviewer 的 rebase 结果）
+- **任务**：按 reviewer 提供的 `fix/pr10-rebase` 更新分支，并补回该版本缺少的清理与断言
+- **关键提示词**：reviewer 已完成 rebase，要求 `git push --force-with-lease origin FETCH_HEAD:feat/m2-query-api`
+- **代理做了什么**：
+  - 采纳 `upstream/fix/pr10-rebase`（`f3ae641`）作为分支基线，强制推送到复刻
+  - 补回 `repository.ensureUser` 删除（该版本仍保留死代码）
+  - 补回 `categories.test` 的 ID 12「贷款」断言
+  - 补回 `query-extra.test` 对 `error.code === INVALID_QUERY_PARAM` 的断言
+- **决策**：以 reviewer 的 rebase 结果为准，差异以单个追加提交补齐，不重写其提交
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **82 例**；`git diff --check` 无输出
+- **人工审核**：待复审
+- **遗留问题**：PR 描述与标题需同步为 82 例、10 文件（实现文件）

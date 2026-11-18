@@ -119,14 +119,18 @@ describe('账单一览补充用例', () => {
     expect(new Set([...firstIds, ...secondIds]).size).toBe(firstIds.length + secondIds.length);
   });
 
-  it('非法 cursor 返回 422', async () => {
-    const { status } = await getJson('/api/transactions?cursor=not-a-cursor');
-    expect(status).toBe(422);
+  it('非法 cursor 返回 422 且错误码为 INVALID_QUERY_PARAM', async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/transactions?cursor=not-a-cursor' });
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toMatchObject({ error: { code: 'INVALID_QUERY_PARAM' } });
   });
 
   it('limit 越界返回 422', async () => {
-    expect((await getJson('/api/transactions?limit=0')).status).toBe(422);
-    expect((await getJson('/api/transactions?limit=101')).status).toBe(422);
+    const zero = await app.inject({ method: 'GET', url: '/api/transactions?limit=0' });
+    const tooLarge = await app.inject({ method: 'GET', url: '/api/transactions?limit=101' });
+    expect(zero.statusCode).toBe(422);
+    expect(tooLarge.statusCode).toBe(422);
+    expect(zero.json()).toMatchObject({ error: { code: 'INVALID_QUERY_PARAM' } });
   });
 
   it('userId 查询参数不改变结果', async () => {
