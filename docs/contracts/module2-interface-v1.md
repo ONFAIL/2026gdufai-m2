@@ -351,7 +351,7 @@ POST /api/categories/13/reassign
 - `PATCH` 不允许修改 `kind`：`kind` 创建后不可变，传入返回 `422 INVALID_QUERY_PARAM`（`field: kind`）；
 - 删除前统计三类引用：`counts.transactions` **包含 `status='void'` 的已作废账单**（作废只改状态，仍保留 `category_id` 引用）；`counts.budgets`、`counts.rules` 同样统计全部引用；
 - 仅当 `transactions`、`budgets`、`rules` 三项计数**全部为 0** 时才允许删除；否则返回 `409 CATEGORY_IN_USE` 并带 `counts`；
-- 删除时先删除该类别下的 `user_category_rules`，再删除类别本身，避免外键约束失败；
+- `rules > 0` 同样返回 `409 CATEGORY_IN_USE`；只有 `POST /reassign` 会迁移学习规则，删除不会清理规则；
 - `POST /reassign` 同时迁移 `transactions`（含已作废账单）、`budgets`、`user_category_rules`；
 - `reassign` 的目标类别必须存在且 `isActive=true`，不存在返回 `404 CATEGORY_NOT_FOUND`，已停用返回 `422 INVALID_QUERY_PARAM`；
 - 迁移时若目标类别在同一月份已有预算，返回 `409 BUDGET_CONFLICT`，`details` 给出 `{ sourceBudgetId, targetBudgetId, month }`，**不做静默合并**；

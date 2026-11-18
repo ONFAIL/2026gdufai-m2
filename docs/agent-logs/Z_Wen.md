@@ -114,6 +114,22 @@
 - **人工审核**：第三轮 Request changes → 已修改，待复审
 - **遗留问题**：`ErrorCode` 的 4 个新码（`INVALID_QUERY_PARAM` / `CATEGORY_NAME_TAKEN` / `CATEGORY_KIND_MISMATCH` / `BUDGET_CONFLICT`）与 `demoUserId` 配置由实现 PR 补齐；预设类别 11→12 的 7 项改动见 review C2 清单
 
+### LOG-Z_Wen-20261118-05
+
+- **时间**：2026-11-18 18:30（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `docs/contract-v1.2` / #11（复审收口）
+- **任务**：更正 `-02` 条目中「4 个新码」的口径，并修正 §2.7 删除规则的自相矛盾
+- **关键提示词**：reviewer 要求日志「4 个新码」改为 6 个；§2.7「删除时先删规则」与「rules 计数必须为 0」矛盾
+- **代理做了什么**：
+  - 更正：`ErrorCode` 实际新增 **6 个**码——`INVALID_QUERY_PARAM`、`CATEGORY_NAME_TAKEN`、`CATEGORY_PRESET_PROTECTED`、`CATEGORY_KIND_MISMATCH`、`BUDGET_NOT_FOUND`、`BUDGET_CONFLICT`；以契约 §2.6 为准
+  - 契约 §2.7：删除「删除时先删除 `user_category_rules`」一句，改为「`rules > 0` 同样 409；只有 `reassign` 迁移规则」
+  - `FUTURE_TIME` 容差保持 5 分钟不变（#9 对齐时把 60s 改为 5min）
+- **决策**：按日志规范不改写已提交的 `-02`，以本条目追加更正
+- **验证**：`git diff --check` 通过；§2.7 三条计数规则与删除/迁移语义逐条核对
+- **人工审核**：reviewer 要求收口，待复审
+- **遗留问题**：无
+
 ### LOG-Z_Wen-20261118-02
 
 - **时间**：2026-11-18 16:10（+08:00）
