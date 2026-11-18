@@ -214,7 +214,37 @@ describe('POST /api/transactions/import', () => {
     const item = second.body.results[0];
     expect(item.status).toBe('confirmed');
     expect(item.matchedTransactionId).toBeNull();
-    expect(item.category).toMatchObject({ name: '其他' });
+    expect(item.category).toMatchObject({ name: '其他收入', kind: 'income' });
+    expect(item.direction).toBe('income');
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_NOT_FOUND_RECORDED',
+      severity: 'warning'
+    });
+  });
+
+  it('带了无效原账单 id：首轮 ORIGINAL_NOT_FOUND，次轮兜底且 matchedTransactionId 为 null', async () => {
+    const key = 'k-invalid-original';
+    const payload = record({
+      idempotencyKey: key,
+      rawText: '退款 60',
+      amount: 60,
+      originalTransactionId: 'tx_not_exist'
+    });
+
+    const first = await send([payload]);
+    expect(first.body.results[0].status).toBe('pending_followup');
+    expect(first.body.results[0].feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_NOT_FOUND',
+      severity: 'blocking'
+    });
+
+    const second = await send([payload]);
+    const item = second.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.matchedTransactionId).toBeNull();
+    expect(item.category).toMatchObject({ name: '其他收入', kind: 'income' });
     expect(item.feedback).toContainEqual({
       field: 'originalTransactionId',
       code: 'ORIGINAL_NOT_FOUND_RECORDED',
@@ -243,10 +273,23 @@ describe('POST /api/transactions/import', () => {
     ]);
     expect(first.body.results[0].status).toBe('pending_followup');
     expect(first.body.results[0].feedback).toContainEqual({
-      code: 'MISSING_ORIGINAL_TRANSACTION',
+      code: 'ORIGINAL_NOT_FOUND',
       severity: 'blocking',
       field: 'originalTransactionId'
     });
+
+    const second = await send([
+      record({
+        idempotencyKey: 'k-old-refund',
+        rawText: '退款 100',
+        amount: 100,
+        originalTransactionId: oldId
+      })
+    ]);
+    const item = second.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.matchedTransactionId).toBeNull();
+    expect(item.category).toMatchObject({ name: '其他收入', kind: 'income' });
   });
 
   it('缺商家时写默认值并给 warning', async () => {

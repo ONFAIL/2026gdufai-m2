@@ -85,12 +85,12 @@
 
 - **时间**：2026-11-17 21:15（+08:00）
 - **工具/模型**：DeepSeek Harness / deepseek-flash
-- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / 待建
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
 - **任务**：退款/还款改为「保留记录但不计入收支」，仅当模块 1 带回原账单 id 且 30 天内才匹配
 - **关键提示词**：「有原账单就引导作废，保留该账单但不计入收支；没有原账单也保留且不计收支」
 - **代理做了什么**：
   - 迁移 `002_refund_neutral.sql`：`entry_type`（normal/refund/repayment）、`matched_transaction_id`
-  - 契约 v1.2：新增 `originalTransactionId`、`matchedTransactionId`、4 个反馈码、统计排除中性记录、账单一览 `entryType` 参数
+  - 契约 v1.3：新增 `originalTransactionId`、`matchedTransactionId`、4 个反馈码、统计排除中性记录、账单一览 `entryType` 参数
   - `intent.ts`：退款/还款关键词识别
   - `intake.ts`：匹配成功→中性入库+引导作废；未匹配→首轮追问 `MISSING_ORIGINAL_TRANSACTION`，次轮归入「其他/其他收入」并记 `ORIGINAL_NOT_FOUND_RECORDED`
   - `stats.ts` / `transactions.ts`：统计只算 `entry_type='normal'`；列表默认 normal，`entryType=all` 可见中性记录
@@ -265,7 +265,6 @@
 - **人工审核**：采纳
 - **遗留问题**：契约缺类别 CRUD、预算写入、账单作废；M4 预算提醒未开始
 
-<<<<<<< HEAD
 ### LOG-Z_Wen-20261118-04
 
 - **时间**：2026-11-18 17:00（+08:00）
@@ -336,3 +335,24 @@
 - **人工审核**：待开 PR 复审
 - **遗留问题**：无
 
+### LOG-Z_Wen-20261118-13
+
+- **时间**：2026-11-18 21:50（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17（复审修复）
+- **任务**：修复退款 PR 的 2 个 P1 与若干 P2 口径问题
+- **关键提示词**：reviewer 指出日志残留冲突标记、未匹配仍写 `matchedTransactionId`、summary 口径、entryType 取值、退款默认方向与追问码等
+- **代理做了什么**：
+  - 删除 `Z_Wen.md` 残留 `<<<<<<< HEAD` 与文件末尾空行
+  - `insertNeutral` 改为显式接收 `matchedTransactionId`：仅匹配分支传原单 id，未匹配兜底传 `null`
+  - 未匹配时的默认方向按类型：退款 → income「其他收入」，还款 → expense「其他」
+  - 「带 id 但未匹配」首轮改用新反馈码 `ORIGINAL_NOT_FOUND`；首轮 pending 同时返回 `timeFeedback`
+  - duplicate 回放从账单行读取 `matchedTransactionId`；`TransactionView` 增加该字段
+  - 中性记录按是否默认时间写 `time_source` / `chat_at`
+  - `getTransactionById` 排除 `status='void'`
+  - 契约：§1.4 补 `matchedTransactionId` 说明；§1.5 增 `ORIGINAL_NOT_FOUND`；§2.3 明确 `summary` 恒只统计 normal、`entryType` 四个取值；§4 退款用例勾选
+  - 测试：新增「无效 id 首轮 ORIGINAL_NOT_FOUND、次轮兜底且 matched 为 null」，覆盖 30 天用例的次轮
+- **决策**：`matchedTransactionId` 只表示「真匹配」；兜底记录一律 `null`
+- **验证**：`typecheck` / `lint` / `test` 全绿；`git diff --check` 无输出
+- **人工审核**：待复审
+- **遗留问题**：前端 mock/`contract.ts` 反馈码需同步，建议新开 issue 跟踪

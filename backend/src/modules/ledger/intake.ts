@@ -23,6 +23,7 @@ export type FeedbackCode =
   | 'FUTURE_TIME'
   | 'MISSING_DIRECTION'
   | 'MISSING_ORIGINAL_TRANSACTION'
+  | 'ORIGINAL_NOT_FOUND'
   | 'CATEGORY_KIND_MISMATCH'
   | 'LOW_CONFIDENCE_CATEGORY'
   | 'MERCHANT_DEFAULTED'
@@ -161,10 +162,16 @@ function insertNeutral(
   record: RawRecord,
   round: number,
   kind: SpecialEntry,
-  resolved: { amountCents: number; occurredAt: string; category: CategoryRow | null },
-  extraFeedback: FeedbackItem[]
+  resolved: {
+    amountCents: number;
+    occurredAt: string;
+    direction: Direction;
+    category: CategoryRow | null;
+  },
+  extraFeedback: FeedbackItem[],
+  matchedTransactionId: string | null
 ): RecordResult {
-  const direction: Direction = record.direction ?? 'expense';
+  const direction = resolved.direction;
   const category = resolved.category;
   const merchant = record.merchant?.trim() === '' || record.merchant === null ? DEFAULT_MERCHANT : record.merchant;
   const feedback = [...extraFeedback];
@@ -174,8 +181,7 @@ function insertNeutral(
 
   const transactionId = `tx_${randomUUID()}`;
   const nowIso = nowIsoShanghai();
-  const matchedTransactionId =
-    kind === 'refund' || kind === 'repayment' ? record.originalTransactionId : null;
+  const usedChatTime = record.occurredAt === null;
 
   db.transaction(() => {
     insertTransaction(db, {
@@ -188,8 +194,8 @@ function insertNeutral(
     note: record.rawText,
     occurredAt: resolved.occurredAt,
     occurredDate: toShanghaiDate(resolved.occurredAt),
-    timeSource: 'explicit',
-    chatAt: null,
+    timeSource: usedChatTime ? 'chat_time' : 'explicit',
+    chatAt: usedChatTime ? resolved.occurredAt : null,
     categoryId: category?.id ?? null,
     categorySource: 'fallback',
     categoryConfidence: 0.3,
@@ -235,31 +241,68 @@ function handleSpecialEntry(
   kind: SpecialEntry,
   resolved: { amountCents: number; occurredAt: string; category: CategoryRow | null },
   timeFeedback: FeedbackItem[],
-  now: Date
+  now: Date,
+  categories: CategoryRow[]
 ): RecordResult {
+  let matched: { id: string; direction: Direction } | null = null;
   if (record.originalTransactionId !== null) {
     const original = getTransactionById(db, record.originalTransactionId, record.userId);
-    if (original !== null && original.entryType === 'normal' && withinMatchWindow(original.occurredAt, now)) {
-      return insertNeutral(db, batch, record, round, kind, resolved, [
+    if (
+      original !== null &&
+      original.entryType === 'normal' &&
+      withinMatchWindow(original.occurredAt, now)
+    ) {
+      matched = { id: original.id, direction: original.direction };
+    }
+  }
+
+  if (matched !== null) {
+    const direction = record.direction ?? matched.direction;
+    return insertNeutral(
+      db,
+      batch,
+      record,
+      round,
+      kind,
+      { ...resolved, direction, category: fallbackCategory(categories, direction) },
+      [
         ...timeFeedback,
         warning(
           'originalTransactionId',
           kind === 'refund' ? 'REFUND_RECORDED_NEUTRAL' : 'REPAYMENT_RECORDED_NEUTRAL'
         )
-      ]);
-    }
+      ],
+      matched.id
+    );
   }
 
   if (round === 0) {
+    // 没带 id 与「带了但没匹配上」是两类问题，需要不同的追问话术。
+    const code =
+      record.originalTransactionId === null
+        ? 'MISSING_ORIGINAL_TRANSACTION'
+        : 'ORIGINAL_NOT_FOUND';
     return persistPending(db, batch, record, round, [
-      blocking('originalTransactionId', 'MISSING_ORIGINAL_TRANSACTION')
+      ...timeFeedback,
+      blocking('originalTransactionId', code)
     ]);
   }
 
-  return insertNeutral(db, batch, record, round, kind, resolved, [
-    ...timeFeedback,
-    warning('originalTransactionId', 'ORIGINAL_NOT_FOUND_RECORDED')
-  ]);
+  const direction: Direction = kind === 'refund' ? 'income' : 'expense';
+  const fallbackName = direction === 'income' ? '其他收入' : '其他';
+  const category =
+    categories.find((item) => item.kind === direction && item.name === fallbackName) ??
+    fallbackCategory(categories, direction);
+  return insertNeutral(
+    db,
+    batch,
+    record,
+    round,
+    kind,
+    { ...resolved, direction, category },
+    [...timeFeedback, warning('originalTransactionId', 'ORIGINAL_NOT_FOUND_RECORDED')],
+    null
+  );
 }
 
 function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: CategoryRow[]): RecordResult {
@@ -276,7 +319,7 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
       occurredAt: view?.occurredAt ?? null,
       category: view?.category ?? null,
       confidence: null,
-      matchedTransactionId: null,
+      matchedTransactionId: view?.matchedTransactionId ?? null,
       feedback: [warning(null, 'DUPLICATE_RECORD')]
     };
   }
@@ -343,7 +386,8 @@ function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: C
       special,
       { amountCents, occurredAt, category: resolvedCategory },
       timeFeedback,
-      now
+      now,
+      categories
     );
   }
 

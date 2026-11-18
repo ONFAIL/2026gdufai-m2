@@ -114,6 +114,8 @@
 }
 ```
 
+`matchedTransactionId`：匹配到的原账单 id；未匹配或普通记账为 `null`。
+
 `status` 四种取值：
 
 | status | 含义 | 模块 1 该做什么 |
@@ -149,6 +151,7 @@
 | `DIRECTION_FORCED_BY_CATEGORY` | 冲突二次以类别为准 | warning | 「按类别记成了收入」 |
 | `DUPLICATE_RECORD` | 幂等键重复 | warning | 「这笔已经记过了」 |
 | `MISSING_ORIGINAL_TRANSACTION` | 退款/还款但缺少原账单 id（首轮） | blocking | 「这笔退款对应哪一笔账单？可以补充金额或日期」 |
+| `ORIGINAL_NOT_FOUND` | 带了原账单 id 但不存在、已作废或超过 30 天（首轮） | blocking | 「没找到这笔原账单，请从账单列表重新选择」 |
 | `REFUND_RECORDED_NEUTRAL` | 退款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请到账单一览作废原账单」 |
 | `REPAYMENT_RECORDED_NEUTRAL` | 还款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请作废原贷款账单」 |
 | `ORIGINAL_NOT_FOUND_RECORDED` | 未匹配到原账单，已归入「其他/其他收入」 | warning | 「没找到原账单，已记为其他且不计收支」 |
@@ -246,7 +249,7 @@
 | `from` / `to` | `YYYY-MM-DD`，闭区间 |
 | `direction` | `expense` \| `income`，默认全部 |
 | `limit` | 默认 20，上限 100 |
-| `entryType` | 默认 `normal`；传 `all` 时包含退款/还款中性记录 |
+| `entryType` | 默认 `normal`；可选 `all`（含退款/还款中性记录）、`refund`、`repayment` |
 | `cursor` | 上一页返回的 `nextCursor`，首页不传 |
 
 ```jsonc
@@ -267,7 +270,8 @@
 }
 ```
 
-- `summary` 是**整个筛选集**的合计，不是本页。
+- `summary` 是**整个筛选集**的合计，不是本页；
+- `summary` **恒只统计 `entry_type='normal'`** 的记录，中性记录只出现在 `items` 中；因此 `entryType=all` 或 `entryType=refund` 时，`summary.count` 可能小于 `items` 条数，金额字段也不含中性记录。
 - 游标分页：把 `nextCursor` 原样回传，不要自己拼 `offset`。
 
 ### 2.4 类别字典 `GET /api/categories`
@@ -474,7 +478,7 @@ POST /api/transactions/tx_xxx/void
 - [ ] 未来时间 → 首轮 `FUTURE_TIME`，第二轮兜底
 - [ ] 同一 `idempotencyKey` 重发 → `duplicate`，账单数不变
 - [ ] 方向与类别冲突 → 首轮 `CATEGORY_KIND_MISMATCH`，第二轮按类别覆盖
-- [ ] 文本含「退款」→ 首轮 `MISSING_ORIGINAL_TRANSACTION`；带原账单 id 或次轮 → 中性记录 `entry_type='refund'`
+- [x] 文本含「退款」→ 不带 id 首轮 `MISSING_ORIGINAL_TRANSACTION`；带无效 id 首轮 `ORIGINAL_NOT_FOUND`；次轮 → 中性记录 `entry_type='refund'`
 - [ ] 缺 `sentAt` → 整批 `INVALID_BATCH`
 - [ ] 入站 `userId` 与 `DEMO_USER_ID` 不一致 → 整批 `INVALID_BATCH`
 

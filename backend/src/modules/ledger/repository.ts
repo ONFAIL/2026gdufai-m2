@@ -83,6 +83,7 @@ export interface TransactionView {
   readonly direction: Direction;
   readonly occurredAt: string;
   readonly category: { id: number; name: string; kind: Direction } | null;
+  readonly matchedTransactionId: string | null;
 }
 
 /** 查询幂等键对应的入站记录。 */
@@ -189,7 +190,8 @@ export function findTransactionByIdempotencyKey(
 ): (TransactionView & { id: string }) | null {
   const row = db
     .prepare(
-      `SELECT t.id, t.direction, t.occurred_at, c.id AS category_id, c.name AS category_name, c.kind AS category_kind
+      `SELECT t.id, t.direction, t.occurred_at, t.matched_transaction_id,
+              c.id AS category_id, c.name AS category_name, c.kind AS category_kind
          FROM transactions t
          LEFT JOIN categories c ON c.id = t.category_id
         WHERE t.idempotency_key = ?`
@@ -199,6 +201,7 @@ export function findTransactionByIdempotencyKey(
         id: string;
         direction: Direction;
         occurred_at: string;
+        matched_transaction_id: string | null;
         category_id: number | null;
         category_name: string | null;
         category_kind: Direction | null;
@@ -212,6 +215,7 @@ export function findTransactionByIdempotencyKey(
     id: row.id,
     direction: row.direction,
     occurredAt: row.occurred_at,
+    matchedTransactionId: row.matched_transaction_id,
     category:
       row.category_id === null || row.category_name === null || row.category_kind === null
         ? null
@@ -231,9 +235,9 @@ export interface OriginalTransaction {
 export function getTransactionById(db: Db, id: string, userId: string): OriginalTransaction | null {
   const row = db
     .prepare(
-      'SELECT id, occurred_at, direction, amount_cents, entry_type FROM transactions WHERE id = ? AND user_id = ?'
+      'SELECT id, occurred_at, direction, amount_cents, entry_type FROM transactions WHERE id = ? AND user_id = ? AND status != ?'
     )
-    .get(id, userId) as
+    .get(id, userId, 'void') as
     | { id: string; occurred_at: string; direction: Direction; amount_cents: number; entry_type: string }
     | undefined;
 
@@ -253,7 +257,8 @@ export function getTransactionById(db: Db, id: string, userId: string): Original
 export function getTransactionView(db: Db, transactionId: string): TransactionView | null {
   const row = db
     .prepare(
-      `SELECT t.direction, t.occurred_at, c.id AS category_id, c.name AS category_name, c.kind AS category_kind
+      `SELECT t.direction, t.occurred_at, t.matched_transaction_id,
+              c.id AS category_id, c.name AS category_name, c.kind AS category_kind
          FROM transactions t
          LEFT JOIN categories c ON c.id = t.category_id
         WHERE t.id = ?`
@@ -262,6 +267,7 @@ export function getTransactionView(db: Db, transactionId: string): TransactionVi
     | {
         direction: Direction;
         occurred_at: string;
+        matched_transaction_id: string | null;
         category_id: number | null;
         category_name: string | null;
         category_kind: Direction | null;
@@ -274,6 +280,7 @@ export function getTransactionView(db: Db, transactionId: string): TransactionVi
   return {
     direction: row.direction,
     occurredAt: row.occurred_at,
+    matchedTransactionId: row.matched_transaction_id,
     category:
       row.category_id === null || row.category_name === null || row.category_kind === null
         ? null
