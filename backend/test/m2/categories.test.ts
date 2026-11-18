@@ -9,7 +9,8 @@ const config: AppConfig = {
   nodeEnv: 'test',
   databasePath: ':memory:',
   uploadDir: './uploads',
-  authToken: null
+  authToken: null,
+  demoUserId: 'u_001'
 };
 
 const db = openDatabase(':memory:');
@@ -27,9 +28,9 @@ describe('GET /api/categories', () => {
   it('返回全部预设类别及收支分布', () => {
     expect(response.statusCode).toBe(200);
     const items = response.json() as Array<{ id: number; kind: string; isPreset: boolean; color: string }>;
-    expect(items).toHaveLength(11);
+    expect(items).toHaveLength(12);
     expect(items.filter((item) => item.kind === 'expense')).toHaveLength(8);
-    expect(items.filter((item) => item.kind === 'income')).toHaveLength(3);
+    expect(items.filter((item) => item.kind === 'income')).toHaveLength(4);
     expect(items.every((item) => item.isPreset)).toBe(true);
     expect(items[0]).toMatchObject({ id: 1, color: '#F97316' });
   });

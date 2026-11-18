@@ -10,7 +10,8 @@ const config: AppConfig = {
   nodeEnv: 'test',
   databasePath: ':memory:',
   uploadDir: './uploads',
-  authToken: null
+  authToken: null,
+  demoUserId: 'u_001'
 };
 
 const db = openDatabase(':memory:');

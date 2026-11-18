@@ -8,7 +8,7 @@ import { listCategoryItems } from './repository.ts';
 import { parseBatch } from './validation.ts';
 
 function invalid(message: string): never {
-  throw new AppError('INVALID_DIMENSION_PARAM', 422, message);
+  throw new AppError('INVALID_QUERY_PARAM', 422, message);
 }
 
 function firstValue(value: unknown): string | undefined {
@@ -90,7 +90,7 @@ export async function registerLedgerRoutes(app: FastifyInstance): Promise<void> 
     if (breakdownBy !== undefined && breakdownBy !== 'category') {
       invalid('breakdownBy 目前只支持 category');
     }
-    const result = buildStats(app.db, firstValue(query.userId) ?? 'u_001', {
+    const result = buildStats(app.db, app.config.demoUserId, {
       dimension: parseDimension(firstValue(query.dimension)),
       date: firstValue(query.date),
       month: firstValue(query.month),
@@ -128,6 +128,6 @@ export async function registerLedgerRoutes(app: FastifyInstance): Promise<void> 
     if (listQuery.limit !== undefined && !Number.isInteger(listQuery.limit)) {
       invalid('limit 必须是整数');
     }
-    return reply.send(listTransactions(app.db, firstValue(query.userId) ?? 'u_001', listQuery));
+    return reply.send(listTransactions(app.db, app.config.demoUserId, listQuery));
   });
 }

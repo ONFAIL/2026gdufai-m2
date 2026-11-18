@@ -245,3 +245,22 @@
 - **验证**：`pnpm --filter @gduf/backend typecheck / lint / test` 全绿，59 个用例通过（新增 12 例）
 - **人工审核**：采纳
 - **遗留问题**：契约缺类别 CRUD、预算写入、账单作废；M4 预算提醒未开始
+
+### LOG-Z_Wen-20261118-04
+
+- **时间**：2026-11-18 17:00（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-query-api` / #10（按 review 修复并 rebase）
+- **任务**：修复查询接口的 P1/P2；在 #9 合入 main 后 rebase，丢弃重复的导入提交
+- **关键提示词**：reviewer 指出 `userId` 可越权读他人数据、merge-base 过时、`topCategory` 语义待定、契约 §4 用例缺失
+- **代理做了什么**：
+  - `git rebase --onto main b008046`：丢弃与 #9 重复的导入提交 `b008046`；冲突 `app.ts`、`config/index.ts`、`Z_Wen.md` 均保留 #9 的 Bearer 鉴权与 `demoUserId` 实现
+  - `routes.ts`：读接口统一取 `app.config.demoUserId`，不接受 `userId` 查询参数；入站 `userId` 不一致整批 `INVALID_BATCH`
+  - `stats.ts`：`dimension=day` 用真实日历校验（`2026-02-31` → 422）；`topCategory` 按当前方向取最高，`direction=all` 时取支出侧，ratio 用同方向分母
+  - 错误码分层：分页 / 筛选 / 游标非法改用 `INVALID_QUERY_PARAM`；dimension 与参数不匹配保留 `INVALID_DIMENSION_PARAM`
+  - `categories.test`：预设类别断言更新为 12 个（income 4 个）
+  - 新增 `query-extra.test.ts`（9 例）：混合收支 ratio、income topCategory、空月份 isEmpty、userId 参数不改变结果、非法日期、同日游标翻页、非法 cursor、limit 越界
+- **决策**：`topCategory` 语义定为「当前方向最高类别，all 时支出侧」；查询参数类错误统一 `INVALID_QUERY_PARAM`，维度与参数不匹配才用 `INVALID_DIMENSION_PARAM`
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **82 例**；frontend 31 例；`git diff --check` 无输出
+- **人工审核**：Request changes → 已修改，待 rebase 后复审
+- **遗留问题**：PR 描述与标题需同步；前端 `StatsView` 切 day/month/year 时未传对应参数，需前端配套

@@ -77,6 +77,20 @@ function daysInMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
+/** 严格校验 YYYY-MM-DD 是真实日历日期（防止 2 月 31 日被 Date.parse 滚动）。 */
+function isRealDate(value: string): boolean {
+  if (!DATE_RE.test(value)) {
+    return false;
+  }
+  const [year, month, day] = value.split('-').map((part) => Number(part));
+  const date = new Date(Date.UTC(year as number, (month as number) - 1, day as number));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() + 1 === month &&
+    date.getUTCDate() === day
+  );
+}
+
 function shiftDate(date: string, days: number): string {
   const time = Date.parse(`${date}T00:00:00+08:00`) + days * 24 * 60 * 60 * 1000;
   return toShanghaiDate(new Date(time).toISOString());
@@ -85,7 +99,7 @@ function shiftDate(date: string, days: number): string {
 function resolveRange(query: StatsQuery): { start: string; end: string; buckets: string[] } {
   switch (query.dimension) {
     case 'day': {
-      if (query.date === undefined || !DATE_RE.test(query.date) || Number.isNaN(Date.parse(`${query.date}T00:00:00+08:00`))) {
+      if (query.date === undefined || !isRealDate(query.date)) {
         invalid('dimension=day 需要合法的 date（YYYY-MM-DD）');
       }
       if (query.month !== undefined || query.year !== undefined) {
@@ -287,10 +301,13 @@ export function buildStats(db: Db, userId: string, query: StatsQuery): StatsResu
     buckets.sort((a, b) => (order === 'asc' ? a.period.localeCompare(b.period) : b.period.localeCompare(a.period)));
   }
 
+  // topCategory 取「当前方向」的最高类别；direction=all 时按支出侧取，ratio 用同方向分母。
+  const topKind: Direction = direction === 'income' ? 'income' : 'expense';
+  const topDenominator = topKind === 'expense' ? summary.expenseCents : summary.incomeCents;
   let topCategory: TopCategory | null = null;
   for (const [categoryId, value] of allCategories) {
     const meta = categoryMeta.get(categoryId);
-    if (meta === undefined || meta.kind !== 'expense') {
+    if (meta === undefined || meta.kind !== topKind) {
       continue;
     }
     if (topCategory === null || value.cents > topCategory.totalCents) {
@@ -298,7 +315,7 @@ export function buildStats(db: Db, userId: string, query: StatsQuery): StatsResu
         categoryId,
         name: meta.name,
         totalCents: value.cents,
-        ratio: summary.expenseCents === 0 ? 0 : Number((value.cents / summary.expenseCents).toFixed(3))
+        ratio: topDenominator === 0 ? 0 : Number((value.cents / topDenominator).toFixed(3))
       };
     }
   }

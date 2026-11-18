@@ -43,7 +43,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_LIMIT = 100;
 
 function invalid(message: string): never {
-  throw new AppError('INVALID_DIMENSION_PARAM', 422, message);
+  throw new AppError('INVALID_QUERY_PARAM', 422, message);
 }
 
 function encodeCursor(date: string, id: string): string {
