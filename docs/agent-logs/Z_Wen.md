@@ -94,3 +94,22 @@
 - **验证**：`git diff --check` 通过；契约错误码表与 §2.7/§2.9 约定逐条核对一致
 - **人工审核**：Request changes → 已修改，待第三轮复审
 - **遗留问题**：issue #12 需补选 M1/M3 受影响模块并勾选「受影响负责人已知悉」；实现 PR 待契约合并后开始
+
+### LOG-Z_Wen-20261118-01
+
+- **时间**：2026-11-18 16:00（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `docs/contract-v1.2` / #11（第三轮 review 修复 + 日志编号说明）
+- **任务**：按第三轮 review 修复 4 个 P1 缺口，并说明代理日志编号跳号原因
+- **关键提示词**：reviewer 第三轮 Request changes，要求合并前解决 4 个 P1 与若干 P2
+- **代理做了什么**：
+  - P1-1：§0.1 鉴权改为「为空或等于 `change-me` 视为未配置、开发模式放行」，与 `.env.example`、`config/index.ts` 的哨兵语义对齐，并注明生产必须设置非占位 token
+  - P1-2：§2.7 删除守卫写明 `counts.transactions` 含 `status='void'` 的作废账单，仅当三类计数全为 0 才允许删除；`reassign` 一并迁移作废账单
+  - P1-3：§2.8 规定 `alertThresholds` 为 1–200 整数、去重升序、最多 5 个、缺省 `[80,100]`，与 `budget_alerts.threshold` 的 CHECK 对齐
+  - P1-4：补齐 PATCH/DELETE/reassign 与 DELETE budgets 的请求体、响应体与成功码（204/200）
+  - P2：新增 `CATEGORY_NAME_TAKEN`(409)、`CATEGORY_PRESET_PROTECTED`(403)；`amountCents` 正整数校验；停用类别退出自动分类、reassign 目标须启用；`kind` 创建后不可变；§2.6 说明 `CATEGORY_KIND_MISMATCH` 两层语义独立
+  - N9：新增本条目说明编号跳号
+- **决策**：编号跳号原因——`LOG-Z_Wen-20261117-01` 写于已删除的 `feat/m2-import-validation` 分支（未进入任何合并分支）；`-05` 写于未合并的退款分支 `feat/m2-refund-neutral3`。按规范不改写历史，仅追加说明
+- **验证**：`git diff --check` 通过；契约错误码表、§2.7 计数规则、§2.8 阈值约束逐条核对；本 PR 仍为文档变更
+- **人工审核**：第三轮 Request changes → 已修改，待复审
+- **遗留问题**：`ErrorCode` 的 4 个新码（`INVALID_QUERY_PARAM` / `CATEGORY_NAME_TAKEN` / `CATEGORY_KIND_MISMATCH` / `BUDGET_CONFLICT`）与 `demoUserId` 配置由实现 PR 补齐；预设类别 11→12 的 7 项改动见 review C2 清单
