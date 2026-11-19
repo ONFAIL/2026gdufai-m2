@@ -310,6 +310,7 @@
 | `INVALID_QUERY_PARAM` | 422 | 查询参数非法（分页、筛选、游标等） |
 | `CATEGORY_NOT_FOUND` | 404 | 类别不存在 |
 | `CATEGORY_IN_USE` | 409 | 删除有数据的类别，返回 `counts` |
+| `TRANSACTION_NOT_FOUND` | 404 | 账单不存在 |
 | `CATEGORY_NAME_TAKEN` | 409 | 同一 `kind` 下类别重名 |
 | `CATEGORY_PRESET_PROTECTED` | 403 | 尝试删除预设类别 |
 | `CATEGORY_KIND_MISMATCH` | 409 | 迁移类别（`reassign`）时，目标类别 `kind` 与账单 `direction` 不一致 |
