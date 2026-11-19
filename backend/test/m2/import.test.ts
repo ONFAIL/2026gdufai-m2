@@ -166,14 +166,14 @@ describe('POST /api/transactions/import', () => {
     });
   });
 
-  it('退款带原账单且在 30 天内：保留记录但不计入收支', async () => {
+  it('等额退款：作废原账单并记中性记录', async () => {
     const original = await send([
       record({ idempotencyKey: 'k-refund-orig', rawText: '买鞋 299', amount: 299, merchant: '鞋店' })
     ]);
     const originalId = original.body.results[0].transactionId as string;
 
     const before = (
-      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11&userId=u1' })
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
     ).json().summary;
 
     const refund = await send([
@@ -187,7 +187,6 @@ describe('POST /api/transactions/import', () => {
     const item = refund.body.results[0];
     expect(item.status).toBe('confirmed');
     expect(item.matchedTransactionId).toBe(originalId);
-    expect(item.category).toMatchObject({ id: 11, name: '其他收入', kind: 'income' });
     expect(item.direction).toBe('income');
     expect(item.feedback).toContainEqual({
       field: 'originalTransactionId',
@@ -195,13 +194,18 @@ describe('POST /api/transactions/import', () => {
       severity: 'warning'
     });
 
+    const originalRow = db
+      .prepare('SELECT status FROM transactions WHERE id = ?')
+      .get(originalId) as { status: string };
+    expect(originalRow.status).toBe('void');
+
     const after = (
-      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11&userId=u1' })
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
     ).json().summary;
-    expect(after).toEqual(before);
+    expect(after.expenseCents).toBe(before.expenseCents - 29900);
   });
 
-  it('退款金额小于原账单：按收入入账并计入统计', async () => {
+  it('退款小于原账单：把原单金额改为剩余金额并记中性', async () => {
     const original = await send([
       record({ idempotencyKey: 'k-partial-orig', rawText: '买鞋 100', amount: 100 })
     ]);
@@ -220,59 +224,70 @@ describe('POST /api/transactions/import', () => {
     ]);
     const item = refund.body.results[0];
     expect(item.status).toBe('confirmed');
-    expect(item.direction).toBe('income');
-    expect(item.category).toMatchObject({ id: 11, name: '其他收入' });
     expect(item.feedback).toContainEqual({
-      field: 'amount',
-      code: 'PARTIAL_REFUND_AS_INCOME',
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_AMOUNT_ADJUSTED',
       severity: 'warning'
     });
-    expect(item.matchedTransactionId).toBe(originalId);
 
-    const row = db
-      .prepare('SELECT entry_type FROM transactions WHERE id = ?')
-      .get(item.transactionId) as { entry_type: string };
-    expect(row.entry_type).toBe('normal');
+    const originalRow = db
+      .prepare('SELECT amount_cents, status FROM transactions WHERE id = ?')
+      .get(originalId) as { amount_cents: number; status: string };
+    expect(originalRow).toEqual({ amount_cents: 7000, status: 'confirmed' });
 
     const after = (
       await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
     ).json().summary;
-    expect(after.incomeCents - before.incomeCents).toBe(3000);
-    expect(after.expenseCents).toBe(before.expenseCents);
+    expect(after.expenseCents).toBe(before.expenseCents - 3000);
   });
 
-  it('退款金额大于原账单：不入库，首轮追问，重发 rejected', async () => {
+  it('退款大于原账单：作废原单，超出部分计入收入', async () => {
     const original = await send([
       record({ idempotencyKey: 'k-exceed-orig', rawText: '买鞋 100', amount: 100 })
     ]);
     const originalId = original.body.results[0].transactionId as string;
-    const before = transactionCount();
-    const payload = record({
-      idempotencyKey: 'k-exceed-refund',
-      rawText: '退款 500',
-      amount: 500,
-      originalTransactionId: originalId
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-exceed-refund',
+        rawText: '退款 150',
+        amount: 150,
+        originalTransactionId: originalId
+      })
+    ]);
+    const item = refund.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'REFUND_EXCESS_AS_INCOME',
+      severity: 'warning'
     });
 
-    const first = await send([payload]);
-    expect(first.body.results[0].status).toBe('pending_followup');
-    expect(first.body.results[0].feedback).toContainEqual({
-      field: 'amount',
-      code: 'REFUND_EXCEEDS_ORIGINAL',
-      severity: 'blocking'
-    });
-    expect(transactionCount()).toBe(before);
+    const originalRow = db
+      .prepare('SELECT status FROM transactions WHERE id = ?')
+      .get(originalId) as { status: string };
+    expect(originalRow.status).toBe('void');
 
-    const second = await send([payload]);
-    expect(second.body.results[0].status).toBe('pending_followup');
-    expect(transactionCount()).toBe(before);
+    const excessRow = db
+      .prepare('SELECT amount_cents, direction, entry_type FROM transactions WHERE idempotency_key = ?')
+      .get('k-exceed-refund#excess') as {
+      amount_cents: number;
+      direction: string;
+      entry_type: string;
+    };
+    expect(excessRow).toEqual({ amount_cents: 5000, direction: 'income', entry_type: 'normal' });
 
-    const third = await send([payload]);
-    expect(third.body.results[0].status).toBe('rejected');
-    expect(transactionCount()).toBe(before);
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after.expenseCents).toBe(before.expenseCents - 10000);
+    expect(after.incomeCents).toBe(before.incomeCents + 5000);
   });
 
-  it('还款匹配到贷款账单：中性记录，方向为支出，不计收支', async () => {
+  it('等额还款：作废原贷款账单并记中性', async () => {
     const loan = await send([
       record({ idempotencyKey: 'k-loan', rawText: '贷款 5000 到账', amount: 5000, merchant: '某银行' })
     ]);
@@ -286,15 +301,14 @@ describe('POST /api/transactions/import', () => {
     const repayment = await send([
       record({
         idempotencyKey: 'k-repayment-matched',
-        rawText: '还款 500',
-        amount: 500,
+        rawText: '还款 5000',
+        amount: 5000,
         originalTransactionId: loanId
       })
     ]);
     const item = repayment.body.results[0];
     expect(item.status).toBe('confirmed');
     expect(item.direction).toBe('expense');
-    expect(item.category).toMatchObject({ id: 8, name: '其他', kind: 'expense' });
     expect(item.matchedTransactionId).toBe(loanId);
     expect(item.feedback).toContainEqual({
       field: 'originalTransactionId',
@@ -302,10 +316,76 @@ describe('POST /api/transactions/import', () => {
       severity: 'warning'
     });
 
+    const loanRow = db
+      .prepare('SELECT status FROM transactions WHERE id = ?')
+      .get(loanId) as { status: string };
+    expect(loanRow.status).toBe('void');
+
     const after = (
       await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
     ).json().summary;
-    expect(after).toEqual(before);
+    expect(after.incomeCents).toBe(before.incomeCents - 500000);
+  });
+
+  it('还款大于贷款：作废原贷款，超出部分计入支出', async () => {
+    const loan = await send([
+      record({ idempotencyKey: 'k-loan-excess', rawText: '贷款 1000 到账', amount: 1000, merchant: '某银行' })
+    ]);
+    const loanId = loan.body.results[0].transactionId as string;
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const repayment = await send([
+      record({
+        idempotencyKey: 'k-repayment-excess',
+        rawText: '还款 1100',
+        amount: 1100,
+        originalTransactionId: loanId
+      })
+    ]);
+    const item = repayment.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'REPAYMENT_EXCESS_AS_EXPENSE',
+      severity: 'warning'
+    });
+
+    const loanRow = db
+      .prepare('SELECT status FROM transactions WHERE id = ?')
+      .get(loanId) as { status: string };
+    expect(loanRow.status).toBe('void');
+
+    const excessRow = db
+      .prepare('SELECT amount_cents, direction FROM transactions WHERE idempotency_key = ?')
+      .get('k-repayment-excess#excess') as { amount_cents: number; direction: string };
+    expect(excessRow).toEqual({ amount_cents: 10000, direction: 'expense' });
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after.incomeCents).toBe(before.incomeCents - 100000);
+    expect(after.expenseCents).toBe(before.expenseCents + 10000);
+  });
+
+  it('部分退款重发：duplicate 且不重复累加', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-dup-partial-orig', rawText: '买书 100', amount: 100 })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    const payload = record({
+      idempotencyKey: 'k-dup-partial-refund',
+      rawText: '退款 30',
+      amount: 30,
+      originalTransactionId: originalId
+    });
+
+    await send([payload]);
+    const before = transactionCount();
+    const again = await send([payload]);
+    expect(again.body.results[0].status).toBe('duplicate');
+    expect(transactionCount()).toBe(before);
   });
 
   it('中性记录重发：duplicate 保留 matchedTransactionId', async () => {

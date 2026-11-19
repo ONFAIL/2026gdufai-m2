@@ -5,6 +5,7 @@ import { nowIsoShanghai, toShanghaiDate } from '../../shared/time.ts';
 import { classify } from './classifier.ts';
 import { detectSpecialEntry, type SpecialEntry } from './intent.ts';
 import {
+  adjustTransactionAmount,
   findIntake,
   findTransactionByIdempotencyKey,
   getTransactionById,
@@ -12,7 +13,8 @@ import {
   insertTransaction,
   listCategories,
   listUserRules,
-  saveIntake
+  saveIntake,
+  voidTransaction
 } from './repository.ts';
 import type { CategoryRow, Direction, RawBatch, RawRecord } from './types.ts';
 
@@ -24,8 +26,9 @@ export type FeedbackCode =
   | 'MISSING_DIRECTION'
   | 'MISSING_ORIGINAL_TRANSACTION'
   | 'ORIGINAL_NOT_FOUND'
-  | 'REFUND_EXCEEDS_ORIGINAL'
-  | 'PARTIAL_REFUND_AS_INCOME'
+  | 'ORIGINAL_AMOUNT_ADJUSTED'
+  | 'REFUND_EXCESS_AS_INCOME'
+  | 'REPAYMENT_EXCESS_AS_EXPENSE'
   | 'CATEGORY_KIND_MISMATCH'
   | 'LOW_CONFIDENCE_CATEGORY'
   | 'MERCHANT_DEFAULTED'
@@ -157,21 +160,22 @@ function persistPending(
       };
 }
 
-/** 写入退款/还款记录：保留但不计入收支统计。 */
-function insertNeutral(
+interface ResolvedSpecial {
+  amountCents: number;
+  occurredAt: string;
+  direction: Direction;
+  category: CategoryRow | null;
+  timeSource: 'explicit' | 'chat_time';
+  chatAt: string | null;
+}
+
+/** 写入退款/还款记录；事务由调用方统一控制。 */
+function persistSpecialEntry(
   db: Db,
   batch: RawBatch,
   record: RawRecord,
   round: number,
-  kind: SpecialEntry,
-  resolved: {
-    amountCents: number;
-    occurredAt: string;
-    direction: Direction;
-    category: CategoryRow | null;
-    timeSource: 'explicit' | 'chat_time';
-    chatAt: string | null;
-  },
+  resolved: ResolvedSpecial,
   extraFeedback: FeedbackItem[],
   matchedTransactionId: string | null,
   entryType: 'normal' | 'refund' | 'repayment'
@@ -187,43 +191,39 @@ function insertNeutral(
   const transactionId = `tx_${randomUUID()}`;
   const nowIso = nowIsoShanghai();
 
-  db.transaction(() => {
-    insertTransaction(db, {
-      id: transactionId,
-      userId: record.userId,
-      direction,
-      // 中性记录的方向由退款/还款类型决定，不来自原账单
-      directionSource: 'category',
-      amountCents: resolved.amountCents,
-      merchant,
-      note: record.rawText,
-      occurredAt: resolved.occurredAt,
-      occurredDate: toShanghaiDate(resolved.occurredAt),
-      timeSource: resolved.timeSource,
-      chatAt: resolved.chatAt,
-      categoryId: category?.id ?? null,
-      // 中性记录走兜底类别，不参与置信度提示
-      categorySource: 'fallback',
-      categoryConfidence: 0.3,
-      sourceModality: record.modality,
-      sourceRef: record.sourceRef,
-      idempotencyKey: record.idempotencyKey,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      entryType,
-      matchedTransactionId
-    });
+  insertTransaction(db, {
+    id: transactionId,
+    userId: record.userId,
+    direction,
+    directionSource: 'category',
+    amountCents: resolved.amountCents,
+    merchant,
+    note: record.rawText,
+    occurredAt: resolved.occurredAt,
+    occurredDate: toShanghaiDate(resolved.occurredAt),
+    timeSource: resolved.timeSource,
+    chatAt: resolved.chatAt,
+    categoryId: category?.id ?? null,
+    categorySource: 'fallback',
+    categoryConfidence: 0.3,
+    sourceModality: record.modality,
+    sourceRef: record.sourceRef,
+    idempotencyKey: record.idempotencyKey,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    entryType,
+    matchedTransactionId
+  });
 
-    saveIntake(db, {
-      idempotencyKey: record.idempotencyKey,
-      recordId: record.recordId,
-      batchId: batch.batchId,
-      status: 'confirmed',
-      followupRound: round,
-      transactionId,
-      feedback
-    });
-  })();
+  saveIntake(db, {
+    idempotencyKey: record.idempotencyKey,
+    recordId: record.recordId,
+    batchId: batch.batchId,
+    status: 'confirmed',
+    followupRound: round,
+    transactionId,
+    feedback
+  });
 
   return {
     recordId: record.recordId,
@@ -236,6 +236,42 @@ function insertNeutral(
     matchedTransactionId,
     feedback
   };
+}
+
+/** 超额部分按普通收入/支出入账（部分退款、带息还款）。 */
+function insertExcessEntry(
+  db: Db,
+  record: RawRecord,
+  resolved: ResolvedSpecial,
+  direction: Direction,
+  category: CategoryRow | null,
+  amountCents: number,
+  matchedTransactionId: string
+): void {
+  const nowIso = nowIsoShanghai();
+  insertTransaction(db, {
+    id: `tx_${randomUUID()}`,
+    userId: record.userId,
+    direction,
+    directionSource: 'category',
+    amountCents,
+    merchant: record.merchant?.trim() === '' || record.merchant === null ? DEFAULT_MERCHANT : record.merchant,
+    note: record.rawText,
+    occurredAt: resolved.occurredAt,
+    occurredDate: toShanghaiDate(resolved.occurredAt),
+    timeSource: resolved.timeSource,
+    chatAt: resolved.chatAt,
+    categoryId: category?.id ?? null,
+    categorySource: 'fallback',
+    categoryConfidence: 0.3,
+    sourceModality: record.modality,
+    sourceRef: record.sourceRef,
+    idempotencyKey: `${record.idempotencyKey}#excess`,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    entryType: 'normal',
+    matchedTransactionId
+  });
 }
 
 /** 处理退款/还款：30 天内且带原账单 id 才算匹配，否则首轮追问、次轮兜底。 */
@@ -270,59 +306,74 @@ function handleSpecialEntry(
   }
 
   if (matched !== null) {
-    const exceeds = resolved.amountCents > matched.amountCents;
-    const partialRefund = kind === 'refund' && resolved.amountCents < matched.amountCents;
-
-    if (exceeds) {
-      // 退款金额大于原账单：不入库，先追问核对；重发仍未改则 rejected。
-      return persistPending(
-        db,
-        batch,
-        record,
-        round,
-        [...timeFeedback, blocking('amount', 'REFUND_EXCEEDS_ORIGINAL')],
-        round >= MAX_FOLLOWUP_ROUNDS
-      );
-    }
-
-    if (partialRefund) {
-      // 部分退款按收入入账（entry_type=normal），与原账单支出相抵。
-      const category =
-        categories.find((item) => item.kind === 'income' && item.name === '其他收入') ??
-        fallbackCategory(categories, 'income');
-      return insertNeutral(
-        db,
-        batch,
-        record,
-        round,
-        kind,
-        { ...resolved, direction: 'income', category },
-        [...timeFeedback, warning('amount', 'PARTIAL_REFUND_AS_INCOME')],
-        matched.id,
-        'normal'
-      );
-    }
-
-    // 中性记录方向只由类型决定：退款 = 收入，还款 = 支出。
+    const diff = resolved.amountCents - matched.amountCents;
     const direction: Direction = kind === 'refund' ? 'income' : 'expense';
-    const extra = [...timeFeedback];
-    extra.push(
-      warning(
-        'originalTransactionId',
-        kind === 'refund' ? 'REFUND_RECORDED_NEUTRAL' : 'REPAYMENT_RECORDED_NEUTRAL'
-      )
-    );
-    return insertNeutral(
-      db,
-      batch,
-      record,
-      round,
-      kind,
-      { ...resolved, direction, category: fallbackCategory(categories, direction) },
-      extra,
-      matched.id,
-      kind
-    );
+    const feedback = [...timeFeedback];
+    let result: RecordResult | undefined;
+
+    db.transaction(() => {
+      if (diff === 0) {
+        // 全额退款/还款：作废原账单，退款/还款本身记中性。
+        voidTransaction(db, matched.id, record.userId, nowIsoShanghai());
+        feedback.push(
+          warning(
+            'originalTransactionId',
+            kind === 'refund' ? 'REFUND_RECORDED_NEUTRAL' : 'REPAYMENT_RECORDED_NEUTRAL'
+          )
+        );
+      } else if (diff < 0) {
+        // 部分退款/还款：把原账单金额改为剩余金额。
+        adjustTransactionAmount(
+          db,
+          matched.id,
+          record.userId,
+          matched.amountCents - resolved.amountCents,
+          nowIsoShanghai()
+        );
+        feedback.push(warning('originalTransactionId', 'ORIGINAL_AMOUNT_ADJUSTED'));
+      } else {
+        // 退款/还款大于原账单：作废原账单，多余部分记收入/支出。
+        voidTransaction(db, matched.id, record.userId, nowIsoShanghai());
+        feedback.push(
+          warning(
+            'originalTransactionId',
+            kind === 'refund' ? 'REFUND_EXCESS_AS_INCOME' : 'REPAYMENT_EXCESS_AS_EXPENSE'
+          )
+        );
+      }
+
+      result = persistSpecialEntry(
+        db,
+        batch,
+        record,
+        round,
+        { ...resolved, direction, category: fallbackCategory(categories, direction) },
+        feedback,
+        matched.id,
+        kind
+      );
+
+      if (diff > 0) {
+        const excessName = direction === 'income' ? '其他收入' : '其他';
+        const excessCategory =
+          categories.find((item) => item.kind === direction && item.name === excessName) ??
+          fallbackCategory(categories, direction);
+        insertExcessEntry(
+          db,
+          record,
+          { ...resolved, direction, category: excessCategory },
+          direction,
+          excessCategory,
+          diff,
+          matched.id
+        );
+      }
+    })();
+
+    if (result !== undefined) {
+      return result;
+    }
+    throw new Error('persistSpecialEntry 未返回结果');
   }
 
   if (!askedOriginal) {
@@ -342,17 +393,23 @@ function handleSpecialEntry(
   const category =
     categories.find((item) => item.kind === direction && item.name === fallbackName) ??
     fallbackCategory(categories, direction);
-  return insertNeutral(
-    db,
-    batch,
-    record,
-    round,
-    kind,
-    { ...resolved, direction, category },
-    [...timeFeedback, warning('originalTransactionId', 'ORIGINAL_NOT_FOUND_RECORDED')],
-    null,
-    kind
-  );
+  let fallbackResult: RecordResult | undefined;
+  db.transaction(() => {
+    fallbackResult = persistSpecialEntry(
+      db,
+      batch,
+      record,
+      round,
+      { ...resolved, direction, category },
+      [...timeFeedback, warning('originalTransactionId', 'ORIGINAL_NOT_FOUND_RECORDED')],
+      null,
+      kind
+    );
+  })();
+  if (fallbackResult !== undefined) {
+    return fallbackResult;
+  }
+  throw new Error('persistSpecialEntry 未返回结果');
 }
 
 function processRecord(db: Db, batch: RawBatch, record: RawRecord, categories: CategoryRow[]): RecordResult {

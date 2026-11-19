@@ -1,7 +1,7 @@
 # 模块 2 接口交接文档
 
 > 适用对象：模块 1（语音/文字/图片记账）、模块 3（自然语言查账）、模块 4（预算提醒，同进程）
-> 文档版本：v1.3（新增退款/还款中性记录：`originalTransactionId`、`entry_type`，统计排除中性记录）
+> 文档版本：v1.4（退款/还款按金额三态处理：等额作废原单、少于原单调整金额、超出部分记收入/支出）
 > 冻结依据：contract-change issue #16；v1.2 契约 + 退款/还款中性记录
 > 维护人：模块 2 负责人
 > 状态：接口定义已冻结；服务端实现按本文档开发中，联调前以本文档为准
@@ -155,8 +155,9 @@
 | `REFUND_RECORDED_NEUTRAL` | 退款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请到账单一览作废原账单」 |
 | `REPAYMENT_RECORDED_NEUTRAL` | 还款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请作废原贷款账单」 |
 | `ORIGINAL_NOT_FOUND_RECORDED` | 未匹配到原账单，已归入「其他/其他收入」 | warning | 「没找到原账单，已记为其他且不计收支」 |
-| `REFUND_EXCEEDS_ORIGINAL` | 退款金额大于原账单，**不入库** | blocking | 「退款金额比原账单还高，请核对退款金额」 |
-| `PARTIAL_REFUND_AS_INCOME` | 退款金额小于原账单，已按收入入账 | warning | 「已按部分退款计入收入」 |
+| `ORIGINAL_AMOUNT_ADJUSTED` | 退款/还款金额小于原账单，已把原账单金额改为剩余金额 | warning | 「已按差额调整原账单金额」 |
+| `REFUND_EXCESS_AS_INCOME` | 退款金额大于原账单，多余部分已计入收入 | warning | 「超出原账单的部分已计入收入」 |
+| `REPAYMENT_EXCESS_AS_EXPENSE` | 还款金额大于原贷款，多余部分已计入支出 | warning | 「超出贷款本金的部分已计入支出」 |
 
 > `MISSING_DIRECTION`：兜底到「其他」视为类别识别成功，**不返回该码**；该码保留但当前不可达，存废由 issue #12 决议。
 >
@@ -468,7 +469,7 @@ POST /api/transactions/tx_xxx/void
 | 11 | 其他收入 | `#9CA3AF` | 利息、分红、基金、股票、理财、收益、报销 |
 | 12 | 贷款 | `#0EA5E9` | 贷款、借款、借到、放款、下款、借钱 |
 
-> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/退货**：金额等于原账单记为中性记录（`entry_type='refund'`，不计收支，引导作废原单）；金额小于原账单按**收入**入账（`entry_type='normal'`，类别「其他收入」）；金额大于原账单**不入库**：首轮追问，重发仍未改则 `rejected`。
+> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/还款**：金额等于原账单 → 作废原单 + 中性记录；金额小于原账单 → 把原单金额改为剩余金额 + 中性记录；金额大于原账单 → 作废原单 + 中性记录，超出部分按**收入（退款）/支出（还款）**入账。
 
 ---
 
@@ -483,7 +484,7 @@ POST /api/transactions/tx_xxx/void
 - [ ] 同一 `idempotencyKey` 重发 → `duplicate`，账单数不变
 - [ ] 方向与类别冲突 → 首轮 `CATEGORY_KIND_MISMATCH`，第二轮按类别覆盖
 - [x] 文本含「退款」→ 不带 id 首轮 `MISSING_ORIGINAL_TRANSACTION`；带无效 id 首轮 `ORIGINAL_NOT_FOUND`；次轮 → 中性记录 `entry_type='refund'`
-- [x] 退款金额等于原单 → 中性；小于原单 → 收入（`PARTIAL_REFUND_AS_INCOME`）；大于原单 → 不入库，首轮 `REFUND_EXCEEDS_ORIGINAL`，重发仍超则 `rejected`
+- [x] 退款/还款金额等于原单 → 作废原单 + 中性记录；小于原单 → 调整原单金额 + 中性记录；大于原单 → 作废原单 + 中性记录 + 超出部分记收入/支出
 - [ ] 缺 `sentAt` → 整批 `INVALID_BATCH`
 - [ ] 入站 `userId` 与 `DEMO_USER_ID` 不一致 → 整批 `INVALID_BATCH`
 
@@ -499,11 +500,12 @@ POST /api/transactions/tx_xxx/void
 
 ## 5. 变更与沟通约定
 
-1. 本文档对应 `contract v1.x`（当前 **v1.3**），**字段只增不删**；破坏性改动会提前在群里通知并升版本号。语义修正均不改变字段与端点形状，属澄清而非破坏性变更：
+1. 本文档对应 `contract v1.x`（当前 **v1.4**），**字段只增不删**；破坏性改动会提前在群里通知并升版本号。语义修正均不改变字段与端点形状，属澄清而非破坏性变更：
    - v1.2：`DUPLICATE_RECORD` 严重度由 `blocking` 改为 `warning`，与 §1.4「按成功处理」一致；
    - v1.2：`FUTURE_TIME` 增加 5 分钟时钟容差，把「未来」的判定边界写死；
    - v1.2：`occurredAt` 要求真实日历日期，拒绝 `2026-02-31` 这类 V8 会静默滚动的输入；
-   - v1.3：退款/还款改为中性记录（`entry_type`），保留但不计入收支；移除 `REFUND_NOT_SUPPORTED`，新增 `ORIGINAL_NOT_FOUND` 等 **7 个**反馈码（`MISSING_ORIGINAL_TRANSACTION`、`ORIGINAL_NOT_FOUND`、`REFUND_RECORDED_NEUTRAL`、`REPAYMENT_RECORDED_NEUTRAL`、`ORIGINAL_NOT_FOUND_RECORDED`、`REFUND_EXCEEDS_ORIGINAL`、`PARTIAL_REFUND_AS_INCOME`）；`summary` 恒只统计 normal，`meta.isEmpty` 依据区间是否有任何记录。
+   - v1.3：退款/还款改为中性记录（`entry_type`），保留但不计入收支；移除 `REFUND_NOT_SUPPORTED`，新增 5 个反馈码；`summary` 恒只统计 normal，`meta.isEmpty` 依据区间是否有任何记录；
+   - v1.4：退款/还款按金额三态——等额作废原单，少于原单调整原单金额，超出部分记收入（退款）/支出（还款）；新增 `ORIGINAL_AMOUNT_ADJUSTED`、`REFUND_EXCESS_AS_INCOME`、`REPAYMENT_EXCESS_AS_EXPENSE` 三个反馈码。
 2. 模块 2 的实现在 `backend/` 下，接口以本文档为准；代码合并后如有差异，以代码为准并同步更新本文档。
 3. 模块 1 / 3 需要新增字段或接口（比如「按商户统计」），先在群里提，确认后由模块 2 加，**不要各自约定后直接改**。
 4. 联调问题优先带三样东西：`batchId` / `recordId` / 接口返回原文，方便直接查 `intake_log`。

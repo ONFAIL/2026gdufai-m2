@@ -231,8 +231,27 @@ export interface OriginalTransaction {
   readonly entryType: string;
 }
 
-/** 按 id 读取用户自己的原账单，用于退款/还款匹配。 */
-export function getTransactionById(db: Db, id: string, userId: string): OriginalTransaction | null {
+/** 作废原账单（软删除，统计排除）。 */
+export function voidTransaction(db: Db, id: string, userId: string, updatedAt: string): void {
+  db.prepare(
+    "UPDATE transactions SET status = 'void', updated_at = ? WHERE id = ? AND user_id = ? AND status = 'confirmed'"
+  ).run(updatedAt, id, userId);
+}
+
+/** 调整原账单金额（部分退款/部分还款时把原单金额改为剩余金额）。 */
+export function adjustTransactionAmount(
+  db: Db,
+  id: string,
+  userId: string,
+  amountCents: number,
+  updatedAt: string
+): void {
+  db.prepare(
+    "UPDATE transactions SET amount_cents = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'confirmed'"
+  ).run(amountCents, updatedAt, id, userId);
+}
+
+/** 按 id 读取用户自己的原账单，用于退款/还款匹配。 */export function getTransactionById(db: Db, id: string, userId: string): OriginalTransaction | null {
   const row = db
     .prepare(
       'SELECT id, occurred_at, direction, amount_cents, entry_type FROM transactions WHERE id = ? AND user_id = ? AND status != ?'

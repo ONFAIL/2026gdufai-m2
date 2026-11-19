@@ -426,3 +426,22 @@
 - **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **96 例**；git diff --check 无输出
 - **人工审核**：待复审
 - **遗留问题**：7 个反馈码需在 contract-change issue 登记
+### LOG-Z_Wen-20261119-04
+
+- **时间**：2026-11-19 15:55（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
+- **任务**：按用户新政策重做退款/还款金额口径（契约 v1.4）
+- **关键提示词**：「无论金额是否相同，匹配原账单后均可入库；大于原账单作废原单并把多余部分定为收入/支出；小于原账单修改原账单金额并入库」
+- **代理做了什么**：
+  - 匹配成功后统一入库中性记录；
+  - 金额相等：作废原单；
+  - 金额小于原单：把原单金额改为剩余金额（ORIGINAL_AMOUNT_ADJUSTED）；
+  - 金额大于原单：作废原单，超出部分按收入（退款）/支出（还款）入账（REFUND_EXCESS_AS_INCOME / REPAYMENT_EXCESS_AS_EXPENSE）；
+  - 原单作废/改额与两条记录同事务；
+  - 契约升 **v1.4**，移除 REFUND_EXCEEDS_ORIGINAL、PARTIAL_REFUND_AS_INCOME，新增 3 个码；
+  - 测试：等额退款/部分退款/超额退款/等额还款/超额还款/部分退款重发
+- **决策**：不再拒绝超额退款；用「作废 + 超出部分入账」保证统计净额正确
+- **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **98 例**；git diff --check 无输出
+- **人工审核**：待复审
+- **遗留问题**：v1.4 属语义变更，需新开 contract-change issue 或更新 #16
