@@ -1,3 +1,8 @@
+import type { CaptureFeedbackCode } from '@gduf/capture-flow';
+
+// 与确认流程复用唯一只读话术表；反馈码/文案变更统一在共享包维护。
+export { captureFeedbackText as feedbackText } from '@gduf/capture-flow';
+
 export type Direction = 'expense' | 'income';
 export type Modality = 'text' | 'voice' | 'image';
 export type ImportStatus = 'confirmed' | 'pending_followup' | 'duplicate' | 'rejected';
@@ -6,39 +11,21 @@ export type BudgetLevel = 'normal' | 'near' | 'over';
 export type StatsDimension = 'day' | 'month' | 'year' | 'recent7';
 export type StatsBasisDateField = 'occurred_date';
 
-export type FeedbackCode =
-  | 'MISSING_AMOUNT'
-  | 'MISSING_TIME'
-  | 'FUTURE_TIME'
-  | 'MISSING_DIRECTION'
-  | 'CATEGORY_KIND_MISMATCH'
-  | 'LOW_CONFIDENCE_CATEGORY'
-  | 'MERCHANT_DEFAULTED'
-  | 'TIME_DEFAULTED_TO_CHAT_TIME'
-  | 'DIRECTION_FORCED_BY_CATEGORY'
-  | 'DUPLICATE_RECORD'
-  | 'REFUND_NOT_SUPPORTED';
+export type FeedbackCode = CaptureFeedbackCode;
 
 export type HttpErrorCode =
   | 'INVALID_BATCH'
   | 'INVALID_DIMENSION_PARAM'
+  | 'INVALID_QUERY_PARAM'
   | 'CATEGORY_NOT_FOUND'
   | 'CATEGORY_IN_USE'
+  | 'CATEGORY_NAME_TAKEN'
+  | 'CATEGORY_PRESET_PROTECTED'
+  | 'CATEGORY_KIND_MISMATCH'
+  | 'BUDGET_NOT_FOUND'
+  | 'BUDGET_CONFLICT'
+  | 'INTERNAL_ERROR'
   | 'UNAUTHORIZED';
-
-export const feedbackText: Record<FeedbackCode, string> = {
-  MISSING_AMOUNT: '缺少金额，请补充消费或收入金额',
-  MISSING_TIME: '缺少发生时间，请补充日期时间',
-  FUTURE_TIME: '发生时间晚于当前时间，请核对',
-  MISSING_DIRECTION: '无法判断支出或收入方向，请明确指定',
-  CATEGORY_KIND_MISMATCH: '所选类别与收支方向不匹配',
-  LOW_CONFIDENCE_CATEGORY: '分类置信度较低，请确认类别是否正确',
-  MERCHANT_DEFAULTED: '未识别到商户名称，已使用默认值',
-  TIME_DEFAULTED_TO_CHAT_TIME: '未识别到发生时间，已默认使用发送时间',
-  DIRECTION_FORCED_BY_CATEGORY: '已根据所选类别自动修正收支方向',
-  DUPLICATE_RECORD: '检测到重复提交，已直接关联已有账单',
-  REFUND_NOT_SUPPORTED: '暂不支持退款或负数入账',
-};
 
 export interface ImportRecord {
   recordId: string;
@@ -72,6 +59,7 @@ export interface FeedbackItem {
   field: string | null;
   code: FeedbackCode;
   severity: FeedbackSeverity;
+  candidates?: { id: number; name: string }[];
 }
 
 export interface ImportResultItem {
