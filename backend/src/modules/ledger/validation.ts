@@ -131,6 +131,13 @@ function parseRecord(value: unknown, index: number): ParseResult | RawRecord {
     return fail(`${prefix}.sourceRef 必须是字符串或 null`, `${prefix}.sourceRef`);
   }
   if (
+    value.originalTransactionId !== undefined &&
+    value.originalTransactionId !== null &&
+    typeof value.originalTransactionId !== 'string'
+  ) {
+    return fail(`${prefix}.originalTransactionId 必须是字符串或 null`, `${prefix}.originalTransactionId`);
+  }
+  if (
     value.confidence !== undefined &&
     value.confidence !== null &&
     (typeof value.confidence !== 'number' || value.confidence < 0 || value.confidence > 1)
@@ -146,6 +153,7 @@ function parseRecord(value: unknown, index: number): ParseResult | RawRecord {
     merchant: (value.merchant ?? null) as string | null,
     occurredAt: (value.occurredAt ?? null) as string | null,
     chatAt: (value.chatAt ?? null) as string | null,
+    originalTransactionId: (value.originalTransactionId ?? null) as string | null,
     rawText: value.rawText,
     modality: modality as Modality,
     sourceRef: (value.sourceRef ?? null) as string | null,

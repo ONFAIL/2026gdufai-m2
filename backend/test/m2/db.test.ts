@@ -6,7 +6,7 @@ describe('数据库迁移与种子', () => {
   it('首次打开会执行迁移并记录版本', () => {
     const db = openDatabase(':memory:');
     const version = Number(db.pragma('user_version', { simple: true }));
-    expect(version).toBe(1);
+    expect(version).toBe(2);
     db.close();
   });
 

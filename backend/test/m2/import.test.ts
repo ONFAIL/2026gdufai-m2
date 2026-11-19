@@ -166,16 +166,478 @@ describe('POST /api/transactions/import', () => {
     });
   });
 
-  it('退款不计收入，返回 REFUND_NOT_SUPPORTED', async () => {
-    const result = await send([
-      record({ idempotencyKey: 'k-refund', rawText: '昨天买的鞋退款 299', amount: 299 })
+  it('等额退款：作废原账单并记中性记录', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-refund-orig', rawText: '买鞋 299', amount: 299, merchant: '鞋店' })
     ]);
-    expect(result.body.results[0].status).toBe('rejected');
-    expect(result.body.results[0].feedback).toContainEqual({
-      field: 'rawText',
-      code: 'REFUND_NOT_SUPPORTED',
+    const originalId = original.body.results[0].transactionId as string;
+
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-refund-matched',
+        rawText: '退款 299',
+        amount: 299,
+        originalTransactionId: originalId
+      })
+    ]);
+    const item = refund.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.matchedTransactionId).toBe(originalId);
+    expect(item.direction).toBe('income');
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'REFUND_RECORDED_NEUTRAL',
+      severity: 'warning'
+    });
+
+    const originalRow = db
+      .prepare('SELECT status FROM transactions WHERE id = ?')
+      .get(originalId) as { status: string };
+    expect(originalRow.status).toBe('void');
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after.expenseCents).toBe(before.expenseCents - 29900);
+  });
+
+  it('退款小于原账单：把原单金额改为剩余金额并记中性', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-partial-orig', rawText: '买鞋 100', amount: 100 })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-partial-refund',
+        rawText: '退款 30',
+        amount: 30,
+        originalTransactionId: originalId
+      })
+    ]);
+    const item = refund.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_AMOUNT_ADJUSTED',
+      severity: 'warning'
+    });
+
+    const originalRow = db
+      .prepare('SELECT amount_cents, status FROM transactions WHERE id = ?')
+      .get(originalId) as { amount_cents: number; status: string };
+    expect(originalRow).toEqual({ amount_cents: 7000, status: 'confirmed' });
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after.expenseCents).toBe(before.expenseCents - 3000);
+  });
+
+  it('退款大于原账单：作废原单，超出部分计入收入', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-exceed-orig', rawText: '买鞋 100', amount: 100 })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-exceed-refund',
+        rawText: '退款 150',
+        amount: 150,
+        originalTransactionId: originalId
+      })
+    ]);
+    const item = refund.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'REFUND_EXCESS_AS_INCOME',
+      severity: 'warning'
+    });
+
+    const originalRow = db
+      .prepare('SELECT status FROM transactions WHERE id = ?')
+      .get(originalId) as { status: string };
+    expect(originalRow.status).toBe('void');
+
+    const excessRow = db
+      .prepare('SELECT amount_cents, direction, entry_type FROM transactions WHERE idempotency_key = ?')
+      .get('k-exceed-refund#excess') as {
+      amount_cents: number;
+      direction: string;
+      entry_type: string;
+    };
+    expect(excessRow).toEqual({ amount_cents: 5000, direction: 'income', entry_type: 'normal' });
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after.expenseCents).toBe(before.expenseCents - 10000);
+    expect(after.incomeCents).toBe(before.incomeCents + 5000);
+  });
+
+  it('等额还款：作废原贷款账单并记中性', async () => {
+    const loan = await send([
+      record({ idempotencyKey: 'k-loan', rawText: '贷款 5000 到账', amount: 5000, merchant: '某银行' })
+    ]);
+    const loanId = loan.body.results[0].transactionId as string;
+    expect(loan.body.results[0].category).toMatchObject({ id: 12, name: '贷款' });
+
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const repayment = await send([
+      record({
+        idempotencyKey: 'k-repayment-matched',
+        rawText: '还款 5000',
+        amount: 5000,
+        originalTransactionId: loanId
+      })
+    ]);
+    const item = repayment.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.direction).toBe('expense');
+    expect(item.matchedTransactionId).toBe(loanId);
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'REPAYMENT_RECORDED_NEUTRAL',
+      severity: 'warning'
+    });
+
+    const loanRow = db
+      .prepare('SELECT status FROM transactions WHERE id = ?')
+      .get(loanId) as { status: string };
+    expect(loanRow.status).toBe('void');
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after.incomeCents).toBe(before.incomeCents - 500000);
+  });
+
+  it('还款大于贷款：作废原贷款，超出部分计入支出', async () => {
+    const loan = await send([
+      record({ idempotencyKey: 'k-loan-excess', rawText: '贷款 1000 到账', amount: 1000, merchant: '某银行' })
+    ]);
+    const loanId = loan.body.results[0].transactionId as string;
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const repayment = await send([
+      record({
+        idempotencyKey: 'k-repayment-excess',
+        rawText: '还款 1100',
+        amount: 1100,
+        originalTransactionId: loanId
+      })
+    ]);
+    const item = repayment.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'REPAYMENT_EXCESS_AS_EXPENSE',
+      severity: 'warning'
+    });
+
+    const loanRow = db
+      .prepare('SELECT status FROM transactions WHERE id = ?')
+      .get(loanId) as { status: string };
+    expect(loanRow.status).toBe('void');
+
+    const excessRow = db
+      .prepare('SELECT amount_cents, direction FROM transactions WHERE idempotency_key = ?')
+      .get('k-repayment-excess#excess') as { amount_cents: number; direction: string };
+    expect(excessRow).toEqual({ amount_cents: 10000, direction: 'expense' });
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after.incomeCents).toBe(before.incomeCents - 100000);
+    expect(after.expenseCents).toBe(before.expenseCents + 10000);
+  });
+
+  it('部分退款重发：duplicate 且不重复累加', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-dup-partial-orig', rawText: '买书 100', amount: 100 })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    const payload = record({
+      idempotencyKey: 'k-dup-partial-refund',
+      rawText: '退款 30',
+      amount: 30,
+      originalTransactionId: originalId
+    });
+
+    await send([payload]);
+    const before = transactionCount();
+    const again = await send([payload]);
+    expect(again.body.results[0].status).toBe('duplicate');
+    expect(transactionCount()).toBe(before);
+  });
+
+  it('还款小于贷款：调整原贷款金额并记中性', async () => {
+    const loan = await send([
+      record({ idempotencyKey: 'k-loan-partial', rawText: '贷款 1000 到账', amount: 1000, merchant: '某银行' })
+    ]);
+    const loanId = loan.body.results[0].transactionId as string;
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const repayment = await send([
+      record({
+        idempotencyKey: 'k-repayment-partial',
+        rawText: '还款 400',
+        amount: 400,
+        originalTransactionId: loanId
+      })
+    ]);
+    const item = repayment.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_AMOUNT_ADJUSTED',
+      severity: 'warning'
+    });
+
+    const loanRow = db
+      .prepare('SELECT amount_cents, status FROM transactions WHERE id = ?')
+      .get(loanId) as { amount_cents: number; status: string };
+    expect(loanRow).toEqual({ amount_cents: 60000, status: 'confirmed' });
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after.incomeCents).toBe(before.incomeCents - 40000);
+  });
+
+  it('已作废的原账单不可匹配', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-void-orig', rawText: '买鞋 100', amount: 100 })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    db.prepare("UPDATE transactions SET status = 'void' WHERE id = ?").run(originalId);
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-void-refund',
+        rawText: '退款 100',
+        amount: 100,
+        originalTransactionId: originalId
+      })
+    ]);
+    expect(refund.body.results[0].status).toBe('pending_followup');
+    expect(refund.body.results[0].feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_NOT_FOUND',
       severity: 'blocking'
     });
+  });
+
+  it('跨用户的原账单不可匹配', async () => {
+    db.prepare("INSERT OR IGNORE INTO users (id, nickname, created_at) VALUES ('u_002', 'u_002', ?)").run(
+      '2026-11-14T12:00:00+08:00'
+    );
+    db.prepare(
+      `INSERT INTO transactions
+         (id, user_id, direction, direction_source, amount_cents, merchant, note, occurred_at, occurred_date,
+          time_source, chat_at, category_id, category_source, category_confidence, status, source_modality,
+          source_ref, anomaly_flag, idempotency_key, created_at, updated_at)
+       VALUES ('tx_other_user', 'u_002', 'expense', 'explicit', 1000, '他人', NULL, '2026-11-14T12:00:00+08:00',
+               '2026-11-14', 'explicit', NULL, 1, 'rule', 0.9, 'confirmed', 'text', NULL, 0, 'key_other',
+               '2026-11-14T12:00:00+08:00', '2026-11-14T12:00:00+08:00')`
+    ).run();
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-cross-user',
+        rawText: '退款 10',
+        amount: 10,
+        originalTransactionId: 'tx_other_user'
+      })
+    ]);
+    expect(refund.body.results[0].status).toBe('pending_followup');
+    expect(refund.body.results[0].feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_NOT_FOUND',
+      severity: 'blocking'
+    });
+  });
+
+  it('entryType=repayment 返回还款中性记录', async () => {
+    const loan = await send([
+      record({ idempotencyKey: 'k-filter-loan', rawText: '贷款 200 到账', amount: 200, merchant: '某银行' })
+    ]);
+    const loanId = loan.body.results[0].transactionId as string;
+    await send([
+      record({
+        idempotencyKey: 'k-filter-repayment',
+        rawText: '还款 200',
+        amount: 200,
+        originalTransactionId: loanId
+      })
+    ]);
+
+    const response = await app.inject({ method: 'GET', url: '/api/transactions?entryType=repayment' });
+    const body = response.json() as { items: Array<{ entryType: string }>; summary: { count: number } };
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.every((item) => item.entryType === 'repayment')).toBe(true);
+    expect(body.summary.count).toBe(0);
+  });
+
+  it('中性记录重发：duplicate 保留 matchedTransactionId', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-dup-orig', rawText: '买书 100', amount: 100, merchant: '书店' })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    const payload = record({
+      idempotencyKey: 'k-dup-refund',
+      rawText: '退款 100',
+      amount: 100,
+      originalTransactionId: originalId
+    });
+
+    await send([payload]);
+    const again = await send([payload]);
+    expect(again.body.results[0].status).toBe('duplicate');
+    expect(again.body.results[0].matchedTransactionId).toBe(originalId);
+  });
+
+  it('中性记录未来时间次轮回退聊天时间，time_source/chat_at 与响应一致', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-future-orig', rawText: '买书 100', amount: 100, merchant: '书店' })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    const payload = record({
+      idempotencyKey: 'k-future-refund',
+      rawText: '退款 100',
+      amount: 100,
+      originalTransactionId: originalId,
+      occurredAt: '2030-01-01T12:00:00+08:00'
+    });
+
+    const first = await send([payload]);
+    expect(first.body.results[0].status).toBe('pending_followup');
+    expect(first.body.results[0].feedback).toContainEqual({
+      field: 'occurredAt',
+      code: 'FUTURE_TIME',
+      severity: 'blocking'
+    });
+
+    const second = await send([payload]);
+    const item = second.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.occurredAt).toBe(SENT_AT);
+
+    const row = db
+      .prepare('SELECT time_source, chat_at FROM transactions WHERE id = ?')
+      .get(item.transactionId) as { time_source: string; chat_at: string | null };
+    expect(row).toEqual({ time_source: 'chat_time', chat_at: SENT_AT });
+  });
+
+  it('退款没带原账单 id：首轮追问，次轮归入其他且不计收支', async () => {
+    const key = 'k-refund-no-original';
+    const first = await send([record({ idempotencyKey: key, rawText: '退款 50', amount: 50 })]);
+    expect(first.body.results[0].status).toBe('pending_followup');
+    expect(first.body.results[0].feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'MISSING_ORIGINAL_TRANSACTION',
+      severity: 'blocking'
+    });
+
+    const second = await send([record({ idempotencyKey: key, rawText: '退款 50', amount: 50 })]);
+    const item = second.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.matchedTransactionId).toBeNull();
+    expect(item.category).toMatchObject({ name: '其他收入', kind: 'income' });
+    expect(item.direction).toBe('income');
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_NOT_FOUND_RECORDED',
+      severity: 'warning'
+    });
+  });
+
+  it('带了无效原账单 id：首轮 ORIGINAL_NOT_FOUND，次轮兜底且 matchedTransactionId 为 null', async () => {
+    const key = 'k-invalid-original';
+    const payload = record({
+      idempotencyKey: key,
+      rawText: '退款 60',
+      amount: 60,
+      originalTransactionId: 'tx_not_exist'
+    });
+
+    const first = await send([payload]);
+    expect(first.body.results[0].status).toBe('pending_followup');
+    expect(first.body.results[0].feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_NOT_FOUND',
+      severity: 'blocking'
+    });
+
+    const second = await send([payload]);
+    const item = second.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.matchedTransactionId).toBeNull();
+    expect(item.category).toMatchObject({ name: '其他收入', kind: 'income' });
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_NOT_FOUND_RECORDED',
+      severity: 'warning'
+    });
+  });
+
+  it('原账单超过 30 天视为未匹配', async () => {
+    const original = await send([
+      record({
+        idempotencyKey: 'k-old-orig',
+        rawText: '买鞋 100',
+        amount: 100,
+        occurredAt: '2026-09-01T12:00:00+08:00'
+      })
+    ]);
+    const oldId = original.body.results[0].transactionId as string;
+
+    const first = await send([
+      record({
+        idempotencyKey: 'k-old-refund',
+        rawText: '退款 100',
+        amount: 100,
+        originalTransactionId: oldId
+      })
+    ]);
+    expect(first.body.results[0].status).toBe('pending_followup');
+    expect(first.body.results[0].feedback).toContainEqual({
+      code: 'ORIGINAL_NOT_FOUND',
+      severity: 'blocking',
+      field: 'originalTransactionId'
+    });
+
+    const second = await send([
+      record({
+        idempotencyKey: 'k-old-refund',
+        rawText: '退款 100',
+        amount: 100,
+        originalTransactionId: oldId
+      })
+    ]);
+    const item = second.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.matchedTransactionId).toBeNull();
+    expect(item.category).toMatchObject({ name: '其他收入', kind: 'income' });
   });
 
   it('缺商家时写默认值并给 warning', async () => {
@@ -261,17 +723,20 @@ describe('POST /api/transactions/import', () => {
   });
 
   it('rejected 重发时保留原 feedback 的 field 与 severity', async () => {
-    const key = 'k-refund-replay';
-    const payload = record({ idempotencyKey: key, rawText: '退款 32.5', amount: 32.5 });
+    const key = 'k-reject-replay';
+    const payload = record({ idempotencyKey: key, amount: null });
 
-    const first = await send([payload]);
-    expect(first.body.results[0].status).toBe('rejected');
-    expect(first.body.results[0].feedback[0]).toMatchObject({ field: 'rawText', severity: 'blocking' });
+    await send([payload]);
+    await send([payload]);
+    const third = await send([payload]);
+    expect(third.body.results[0].status).toBe('rejected');
+    expect(third.body.results[0].feedback[0]).toMatchObject({ field: 'amount', severity: 'blocking' });
 
-    const second = await send([payload]);
-    expect(second.body.results[0].feedback[0]).toMatchObject({
-      field: 'rawText',
-      code: 'REFUND_NOT_SUPPORTED',
+    const fourth = await send([payload]);
+    expect(fourth.body.results[0].status).toBe('rejected');
+    expect(fourth.body.results[0].feedback[0]).toMatchObject({
+      field: 'amount',
+      code: 'MISSING_AMOUNT',
       severity: 'blocking'
     });
   });

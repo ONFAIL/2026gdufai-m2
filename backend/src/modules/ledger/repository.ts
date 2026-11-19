@@ -75,12 +75,15 @@ export interface TransactionInput {
   readonly idempotencyKey: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly entryType: 'normal' | 'refund' | 'repayment';
+  readonly matchedTransactionId: string | null;
 }
 
 export interface TransactionView {
   readonly direction: Direction;
   readonly occurredAt: string;
   readonly category: { id: number; name: string; kind: Direction } | null;
+  readonly matchedTransactionId: string | null;
 }
 
 /** 查询幂等键对应的入站记录。 */
@@ -152,8 +155,9 @@ export function insertTransaction(db: Db, input: TransactionInput): void {
     `INSERT INTO transactions
        (id, user_id, direction, direction_source, amount_cents, merchant, note,
         occurred_at, occurred_date, time_source, chat_at, category_id, category_source,
-        category_confidence, status, source_modality, source_ref, idempotency_key, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?)`
+        category_confidence, status, source_modality, source_ref, idempotency_key, created_at, updated_at,
+        entry_type, matched_transaction_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.id,
     input.userId,
@@ -173,7 +177,9 @@ export function insertTransaction(db: Db, input: TransactionInput): void {
     input.sourceRef,
     input.idempotencyKey,
     input.createdAt,
-    input.updatedAt
+    input.updatedAt,
+    input.entryType,
+    input.matchedTransactionId
   );
 }
 
@@ -184,7 +190,8 @@ export function findTransactionByIdempotencyKey(
 ): (TransactionView & { id: string }) | null {
   const row = db
     .prepare(
-      `SELECT t.id, t.direction, t.occurred_at, c.id AS category_id, c.name AS category_name, c.kind AS category_kind
+      `SELECT t.id, t.direction, t.occurred_at, t.matched_transaction_id,
+              c.id AS category_id, c.name AS category_name, c.kind AS category_kind
          FROM transactions t
          LEFT JOIN categories c ON c.id = t.category_id
         WHERE t.idempotency_key = ?`
@@ -194,6 +201,7 @@ export function findTransactionByIdempotencyKey(
         id: string;
         direction: Direction;
         occurred_at: string;
+        matched_transaction_id: string | null;
         category_id: number | null;
         category_name: string | null;
         category_kind: Direction | null;
@@ -207,6 +215,7 @@ export function findTransactionByIdempotencyKey(
     id: row.id,
     direction: row.direction,
     occurredAt: row.occurred_at,
+    matchedTransactionId: row.matched_transaction_id,
     category:
       row.category_id === null || row.category_name === null || row.category_kind === null
         ? null
@@ -214,10 +223,62 @@ export function findTransactionByIdempotencyKey(
   };
 }
 
-/** 按 id 读取账单视图，用于幂等重复时回显已有结果。 */
-export function getTransactionView(db: Db, transactionId: string): TransactionView | null {  const row = db
+export interface OriginalTransaction {
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly direction: Direction;
+  readonly amountCents: number;
+  readonly entryType: string;
+}
+
+/** 作废原账单（软删除，统计排除）。 */
+export function voidTransaction(db: Db, id: string, userId: string, updatedAt: string): void {
+  db.prepare(
+    "UPDATE transactions SET status = 'void', updated_at = ? WHERE id = ? AND user_id = ? AND status = 'confirmed'"
+  ).run(updatedAt, id, userId);
+}
+
+/** 调整原账单金额（部分退款/部分还款时把原单金额改为剩余金额）。 */
+export function adjustTransactionAmount(
+  db: Db,
+  id: string,
+  userId: string,
+  amountCents: number,
+  updatedAt: string
+): void {
+  db.prepare(
+    "UPDATE transactions SET amount_cents = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'confirmed'"
+  ).run(amountCents, updatedAt, id, userId);
+}
+
+/** 按 id 读取用户自己的原账单，用于退款/还款匹配。 */
+export function getTransactionById(db: Db, id: string, userId: string): OriginalTransaction | null {
+  const row = db
     .prepare(
-      `SELECT t.direction, t.occurred_at, c.id AS category_id, c.name AS category_name, c.kind AS category_kind
+      'SELECT id, occurred_at, direction, amount_cents, entry_type FROM transactions WHERE id = ? AND user_id = ? AND status != ?'
+    )
+    .get(id, userId, 'void') as
+    | { id: string; occurred_at: string; direction: Direction; amount_cents: number; entry_type: string }
+    | undefined;
+
+  if (row === undefined) {
+    return null;
+  }
+  return {
+    id: row.id,
+    occurredAt: row.occurred_at,
+    direction: row.direction,
+    amountCents: row.amount_cents,
+    entryType: row.entry_type
+  };
+}
+
+/** 按 id 读取账单视图，用于幂等重复时回显已有结果。 */
+export function getTransactionView(db: Db, transactionId: string): TransactionView | null {
+  const row = db
+    .prepare(
+      `SELECT t.direction, t.occurred_at, t.matched_transaction_id,
+              c.id AS category_id, c.name AS category_name, c.kind AS category_kind
          FROM transactions t
          LEFT JOIN categories c ON c.id = t.category_id
         WHERE t.id = ?`
@@ -226,6 +287,7 @@ export function getTransactionView(db: Db, transactionId: string): TransactionVi
     | {
         direction: Direction;
         occurred_at: string;
+        matched_transaction_id: string | null;
         category_id: number | null;
         category_name: string | null;
         category_kind: Direction | null;
@@ -238,6 +300,7 @@ export function getTransactionView(db: Db, transactionId: string): TransactionVi
   return {
     direction: row.direction,
     occurredAt: row.occurred_at,
+    matchedTransactionId: row.matched_transaction_id,
     category:
       row.category_id === null || row.category_name === null || row.category_kind === null
         ? null

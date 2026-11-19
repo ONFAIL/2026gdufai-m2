@@ -81,6 +81,25 @@
 - **人工审核**：采纳
 - **遗留问题**：统计、账单一览、类别字典接口未实现；预算提醒属 M4
 
+### LOG-Z_Wen-20261117-05
+
+- **时间**：2026-11-17 21:15（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
+- **任务**：退款/还款改为「保留记录但不计入收支」，仅当模块 1 带回原账单 id 且 30 天内才匹配
+- **关键提示词**：「有原账单就引导作废，保留该账单但不计入收支；没有原账单也保留且不计收支」
+- **代理做了什么**：
+  - 迁移 `002_refund_neutral.sql`：`entry_type`（normal/refund/repayment）、`matched_transaction_id`
+  - 契约 v1.3：新增 `originalTransactionId`、`matchedTransactionId`、4 个反馈码、统计排除中性记录、账单一览 `entryType` 参数
+  - `intent.ts`：退款/还款关键词识别
+  - `intake.ts`：匹配成功→中性入库+引导作废；未匹配→首轮追问 `MISSING_ORIGINAL_TRANSACTION`，次轮归入「其他/其他收入」并记 `ORIGINAL_NOT_FOUND_RECORDED`
+  - `stats.ts` / `transactions.ts`：统计只算 `entry_type='normal'`；列表默认 normal，`entryType=all` 可见中性记录
+  - 测试：import 12、intent 3、transactions 6，共 63 例
+- **决策**：中性记录仍写 `status=confirmed`（保留可查），用 `entry_type` 区分是否计入统计；匹配窗口 30 天由服务端计算
+- **验证**：`pnpm --filter @gduf/backend typecheck / lint / test` 全绿，63 例通过
+- **人工审核**：采纳
+- **遗留问题**：契约变更需开 issue；前端 `contract.ts` 的反馈码需同步（移除了 `REFUND_NOT_SUPPORTED`）；导入 PR 与查询 PR 尚未合并到 main，本分支为堆叠分支
+
 ### LOG-Z_Wen-20261117-06
 
 - **时间**：2026-11-17 21:55（+08:00）
@@ -281,3 +300,178 @@
 - **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **82 例**；`git diff --check` 无输出
 - **人工审核**：待复审
 - **遗留问题**：PR 描述与标题需同步为 82 例、10 文件（实现文件）
+
+### LOG-Z_Wen-20261118-11
+
+- **时间**：2026-11-18 20:45（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / 退款中性记录
+- **任务**：#10 合并后把退款分支 rebase 到最新基线，契约升 v1.3 并解决冲突
+- **关键提示词**：用户确认 #10 已合并；reviewer 要求退款分支最后处理
+- **代理做了什么**：
+  - rebase 到本地 `feat/m2-query-api`（`21df5c0`，内容等于 main + #10），丢弃旧的导入/查询提交
+  - 契约升 **v1.3**：保留 main 的 v1.2 内容，叠加退款中性记录；删除 `REFUND_NOT_SUPPORTED`，新增 4 个反馈码；§3 与 §4 口径同步
+  - `intake.ts`：中性记录写入包进事务；`saveIntake` 改存完整 feedback；duplicate 返回补 `matchedTransactionId`
+  - `repository.ts`：同时保留 `findTransactionByIdempotencyKey` 与 `getTransactionById`
+  - 日志冲突按时间排序，双方条目全留
+  - GLOSSARY：退款/中性记录口径更新
+- **决策**：中性记录保留 `status=confirmed`，用 `entry_type` 排除统计；契约版本 v1.3
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **86 例**；`git diff --check` 无输出
+- **人工审核**：待开 PR 复审
+- **遗留问题**：前端 `contract.ts` 的反馈码需同步（移除 `REFUND_NOT_SUPPORTED`、新增 4 码）；前端无 `entryType` 显示
+
+### LOG-Z_Wen-20261118-12
+
+- **时间**：2026-11-18 20:55（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / 退款中性记录
+- **任务**：把契约 v1.3 的冻结依据指向新建的 contract-change issue #16
+- **关键提示词**：用户创建了 issue #16，要求补进契约
+- **代理做了什么**：
+  - 契约头部 `冻结依据` 由 `#12` 改为 `#16`
+  - 本日志条目
+- **决策**：v1.3 单独引用 #16，不复用 v1.2 的 #12
+- **验证**：`git diff --check` 无输出；仅文档变更
+- **人工审核**：待开 PR 复审
+- **遗留问题**：无
+
+### LOG-Z_Wen-20261118-13
+
+- **时间**：2026-11-18 21:50（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17（复审修复）
+- **任务**：修复退款 PR 的 2 个 P1 与若干 P2 口径问题
+- **关键提示词**：reviewer 指出日志残留冲突标记、未匹配仍写 `matchedTransactionId`、summary 口径、entryType 取值、退款默认方向与追问码等
+- **代理做了什么**：
+  - 删除 `Z_Wen.md` 残留 `<<<<<<< HEAD` 与文件末尾空行
+  - `insertNeutral` 改为显式接收 `matchedTransactionId`：仅匹配分支传原单 id，未匹配兜底传 `null`
+  - 未匹配时的默认方向按类型：退款 → income「其他收入」，还款 → expense「其他」
+  - 「带 id 但未匹配」首轮改用新反馈码 `ORIGINAL_NOT_FOUND`；首轮 pending 同时返回 `timeFeedback`
+  - duplicate 回放从账单行读取 `matchedTransactionId`；`TransactionView` 增加该字段
+  - 中性记录按是否默认时间写 `time_source` / `chat_at`
+  - `getTransactionById` 排除 `status='void'`
+  - 契约：§1.4 补 `matchedTransactionId` 说明；§1.5 增 `ORIGINAL_NOT_FOUND`；§2.3 明确 `summary` 恒只统计 normal、`entryType` 四个取值；§4 退款用例勾选
+  - 测试：新增「无效 id 首轮 ORIGINAL_NOT_FOUND、次轮兜底且 matched 为 null」，覆盖 30 天用例的次轮
+- **决策**：`matchedTransactionId` 只表示「真匹配」；兜底记录一律 `null`
+- **验证**：`typecheck` / `lint` / `test` 全绿；`git diff --check` 无输出
+- **人工审核**：待复审
+- **遗留问题**：前端 mock/`contract.ts` 反馈码需同步，建议新开 issue 跟踪
+### LOG-Z_Wen-20261118-14
+
+- **时间**：2026-11-18 23:15（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17（第三轮复审修复）
+- **任务**：修复匹配方向、time_source、追问轮次共享与 isEmpty 口径
+- **关键提示词**：reviewer 指出还款匹配后被打成 income、未来时间兜底仍写 explicit、退款可能从未被问原单、只有中性记录的月份 isEmpty=true
+- **代理做了什么**：
+  - 中性记录方向统一由 kind 决定（退款 income / 还款 expense），不再取原账单方向；directionSource 记 category
+  - 	imeSource/chatAt 从 processRecord 传入 insertNeutral，未来时间兜底也写 chat_time
+  - 追问改为按「是否问过原账单」判断（读 existing.feedback），不再按轮次
+  - stats.isEmpty 改为依据区间内是否有任何记录（含中性），summary.count 仍只算 normal
+  - summary 增加 entryType 交集条件：entryType=refund 时 count=0
+  - 契约 §2.2 补 isEmpty 口径、§2.3 措辞放宽、§5.1 升 v1.3 并补退款语义
+  - 删除过期文档 docs/handover-m2-contract-and-user.md
+  - 测试：新增还款端到端、entryType=refund、entryType 非法值、中性记录 duplicate 回放
+- **决策**：中性记录方向只看类型；isEmpty 看「有无记录」而非「有无收支」
+- **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **91 例**；git diff --check 无输出
+- **人工审核**：待复审
+- **遗留问题**：前端同步由 #18 跟踪；退款金额超过原单的告警与中性记录唯一冲突自愈未做（P3）
+### LOG-Z_Wen-20261119-01
+
+- **时间**：2026-11-19 12:05（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17（第四轮复审修复）
+- **任务**：修复 isEmpty 忽略筛选的回归，并订正契约与清理死代码
+- **关键提示词**：reviewer 指出 hasAnyRecord 未带 direction/categoryIds 筛选；契约反馈码数量写错；isRefund 无调用方
+- **代理做了什么**：
+  - stats.ts：hasAnyRecord 带上 direction / categoryIds 条件（仍不含 entry_type），补「只有中性记录」与「direction 筛选无匹配」两条用例
+  - 契约 §5.1 反馈码数量改为 5 并列出；§1.5 补中性记录方向与 direction_source 口径
+  - 删除 intent.ts 中无生产调用的 isRefund 及测试引用
+  - 新增「中性记录未来时间次轮回退聊天时间」用例，断言 	ime_source / chat_at
+- **决策**：isEmpty 跟随筛选条件，但中性记录仍算「有记录」
+- **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **94 例**；git diff --check 无输出
+- **人工审核**：待复审
+- **遗留问题**：退款金额超原单告警、中性记录唯一冲突自愈未实现，需另开 issue
+### LOG-Z_Wen-20261119-02
+
+- **时间**：2026-11-19 12:15（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
+- **任务**：按用户决定实现「只支持全额退款」的金额口径
+- **关键提示词**：「只支持全额退款；退款大于原账单提示请核对退款金额；退款小于原账单计入收入」
+- **代理做了什么**：
+  - 退款金额等于原单 → 中性记录（不变）
+  - 退款金额小于原单 → 按收入入账（entry_type='normal'、direction=income、类别「其他收入」），带 PARTIAL_REFUND_AS_INCOME warning
+  - 退款金额大于原单 → 仍记中性，带 REFUND_EXCEEDS_ORIGINAL warning
+  - insertNeutral 增加 entryType 参数，支持部分退款走 normal
+  - 契约：§1.5 增 2 个反馈码、§3 口径、§4 用例、§5.1 数量改 7
+  - 测试：部分退款计入收入、超额退款中性并提示
+- **决策**：部分退款不再引导作废原单，直接以收入与原支出相抵，统计结果正确
+- **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **96 例**；git diff --check 无输出
+- **人工审核**：待复审
+- **遗留问题**：新增 2 个反馈码需在 contract-change issue 登记（#16 或新开）
+### LOG-Z_Wen-20261119-03
+
+- **时间**：2026-11-19 12:25（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
+- **任务**：按用户决定把「退款大于原账单」改为不入库
+- **关键提示词**：「退款>原账单，不能入库」
+- **代理做了什么**：
+  - handleSpecialEntry：退款/还款金额大于原账单时返回 pending_followup + blocking REFUND_EXCEEDS_ORIGINAL，不写账单；
+  - 重发仍超则按轮次转 ejected；
+  - 契约 §1.5 严重度改 blocking、§3 口径与 §4 用例同步；
+  - 测试改为「首轮 pending、次轮 pending、第三次 rejected，账单数不变」。
+- **决策**：超额退款一律不入库，避免污染收支
+- **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **96 例**；git diff --check 无输出
+- **人工审核**：待复审
+- **遗留问题**：7 个反馈码需在 contract-change issue 登记
+### LOG-Z_Wen-20261119-04
+
+- **时间**：2026-11-19 15:55（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
+- **任务**：按用户新政策重做退款/还款金额口径（契约 v1.4）
+- **关键提示词**：「无论金额是否相同，匹配原账单后均可入库；大于原账单作废原单并把多余部分定为收入/支出；小于原账单修改原账单金额并入库」
+- **代理做了什么**：
+  - 匹配成功后统一入库中性记录；
+  - 金额相等：作废原单；
+  - 金额小于原单：把原单金额改为剩余金额（ORIGINAL_AMOUNT_ADJUSTED）；
+  - 金额大于原单：作废原单，超出部分按收入（退款）/支出（还款）入账（REFUND_EXCESS_AS_INCOME / REPAYMENT_EXCESS_AS_EXPENSE）；
+  - 原单作废/改额与两条记录同事务；
+  - 契约升 **v1.4**，移除 REFUND_EXCEEDS_ORIGINAL、PARTIAL_REFUND_AS_INCOME，新增 3 个码；
+  - 测试：等额退款/部分退款/超额退款/等额还款/超额还款/部分退款重发
+- **决策**：不再拒绝超额退款；用「作废 + 超出部分入账」保证统计净额正确
+- **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **98 例**；git diff --check 无输出
+- **人工审核**：待复审
+- **遗留问题**：v1.4 属语义变更，需新开 contract-change issue 或更新 #16
+### LOG-Z_Wen-20261119-05
+
+- **时间**：2026-11-19 16:05（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
+- **任务**：契约 v1.4 的冻结依据改为新开的 contract-change issue #21
+- **关键提示词**：用户创建 #21，要求补进契约
+- **代理做了什么**：
+  - 契约头部 冻结依据 改为 #21，并注明 #16 为 v1.3 基线
+  - 本日志条目
+- **决策**：v1.3 与 v1.4 分别引用 #16 / #21
+- **验证**：git diff --check 无输出；仅文档变更
+- **人工审核**：待复审
+- **遗留问题**：无
+### LOG-Z_Wen-20261119-07
+
+- **时间**：2026-11-19 17:05（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
+- **任务**：按第五轮复审修契约文案与 P3 项
+- **关键提示词**：reviewer 指出 `REFUND_RECORDED_NEUTRAL` / `REPAYMENT_RECORDED_NEUTRAL` 话术与「已自动作废」不一致；P3 提到日志转义缺字
+- **代理做了什么**：
+  - 契约：两个反馈码话术改为「原账单已自动作废」；§2.3 明确 isEmpty 跟随筛选、filter 示例补 entryType；§3 说明超额产生两条记录；GLOSSARY 改为「自动作废或调整金额」
+  - 代码：删除 `matched.direction` 未使用字段；修正 `repository.ts` 注释与函数同行
+  - 测试：补部分还款、作废原单不可匹配、跨用户不可匹配、entryType=repayment，共 102 例
+  - 日志：本条更正历史条目中因终端转义丢失的字母（实际命令为 `typecheck` / `test`，字段为 `timeSource`），并补文件末尾换行
+- **决策**：不改写已提交日志条目，以本条目说明
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **102 例**
+- **人工审核**：待复审
+- **遗留问题**：PR 描述 diff 数字需按实际更新；#18 需补 v1.4 清单；#21 需勾选受影响方

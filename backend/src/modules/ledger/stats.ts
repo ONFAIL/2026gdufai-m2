@@ -192,16 +192,30 @@ export function buildStats(db: Db, userId: string, query: StatsQuery): StatsResu
   const direction = query.direction ?? 'all';
   const order = query.order ?? 'asc';
 
-  const conditions = ['user_id = ?', "status = 'confirmed'", 'occurred_date BETWEEN ? AND ?'];
+  const conditions = [
+    'user_id = ?',
+    "status = 'confirmed'",
+    // 退款/还款记录保留但为中性记录，不计入收支统计
+    "entry_type = 'normal'",
+    'occurred_date BETWEEN ? AND ?'
+  ];
   const params: Array<string | number> = [userId, range.start, range.end];
+  // isEmpty 只看「有没有记录」，因此不加 entry_type，但要跟随 direction / categoryIds 筛选。
+  const anyConditions = ['user_id = ?', "status = 'confirmed'", 'occurred_date BETWEEN ? AND ?'];
+  const anyParams: Array<string | number> = [userId, range.start, range.end];
 
   if (direction !== 'all') {
     conditions.push('direction = ?');
     params.push(direction);
+    anyConditions.push('direction = ?');
+    anyParams.push(direction);
   }
   if (query.categoryIds !== undefined && query.categoryIds.length > 0) {
-    conditions.push(`category_id IN (${query.categoryIds.map(() => '?').join(', ')})`);
+    const placeholders = query.categoryIds.map(() => '?').join(', ');
+    conditions.push(`category_id IN (${placeholders})`);
     params.push(...query.categoryIds);
+    anyConditions.push(`category_id IN (${placeholders})`);
+    anyParams.push(...query.categoryIds);
   }
 
   const rows = db
@@ -212,6 +226,15 @@ export function buildStats(db: Db, userId: string, query: StatsQuery): StatsResu
         GROUP BY occurred_date, category_id, direction`
     )
     .all(...params) as AggregateRow[];
+
+  // isEmpty 表示「区间内是否有任何记录」（含中性记录）；summary.count 仍只算 normal。
+  const hasAnyRecord =
+    db
+      .prepare(
+        `SELECT 1 AS hit FROM transactions
+          WHERE ${anyConditions.join(' AND ')} LIMIT 1`
+      )
+      .get(...anyParams) !== undefined;
 
   const categoryMeta = new Map<number, CategoryMeta>();
   const categoryRows = db
@@ -336,7 +359,7 @@ export function buildStats(db: Db, userId: string, query: StatsQuery): StatsResu
       unit: 'cent',
       basis: { dateField: 'occurred_date', timezone: 'Asia/Shanghai', includeVoid: false },
       generatedAt: nowIsoShanghai(),
-      isEmpty: summary.count === 0
+      isEmpty: !hasAnyRecord
     }
   };
 }
