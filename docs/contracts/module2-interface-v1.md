@@ -152,8 +152,8 @@
 | `DUPLICATE_RECORD` | 幂等键重复 | warning | 「这笔已经记过了」 |
 | `MISSING_ORIGINAL_TRANSACTION` | 退款/还款但缺少原账单 id（首轮） | blocking | 「这笔退款对应哪一笔账单？可以补充金额或日期」 |
 | `ORIGINAL_NOT_FOUND` | 带了原账单 id 但不存在、已作废或超过 30 天（首轮） | blocking | 「没找到这笔原账单，请从账单列表重新选择」 |
-| `REFUND_RECORDED_NEUTRAL` | 退款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请到账单一览作废原账单」 |
-| `REPAYMENT_RECORDED_NEUTRAL` | 还款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请作废原贷款账单」 |
+| `REFUND_RECORDED_NEUTRAL` | 退款已记录为中性，匹配到原账单 | warning | 「已记录为中性，不计入收支；原账单已自动作废」 |
+| `REPAYMENT_RECORDED_NEUTRAL` | 还款已记录为中性，匹配到原账单 | warning | 「已记录为中性，不计入收支；原贷款账单已自动作废」 |
 | `ORIGINAL_NOT_FOUND_RECORDED` | 未匹配到原账单，已归入「其他/其他收入」 | warning | 「没找到原账单，已记为其他且不计收支」 |
 | `ORIGINAL_AMOUNT_ADJUSTED` | 退款/还款金额小于原账单，已把原账单金额改为剩余金额 | warning | 「已按差额调整原账单金额」 |
 | `REFUND_EXCESS_AS_INCOME` | 退款金额大于原账单，多余部分已计入收入 | warning | 「超出原账单的部分已计入收入」 |
@@ -243,7 +243,7 @@
 - **金额字段全部是「分」**（`meta.unit = "cent"`），展示前除以 100。
 - `netCents = incomeCents - expenseCents`，可为负，**不要叫「余额」**。
 - `ratio` 分母是**同方向**合计：支出类别 ÷ `expenseCents`，收入类别 ÷ `incomeCents`。
-- `meta.isEmpty = true` 时回答「这个月还没有记录」，而不是「花了 0 元」。`meta.isEmpty` 只表示**区间内没有任何记录**（含退款/还款中性记录），因此可能与 `summary.count = 0` 同时出现「有记录但无收支」的情况。
+- `meta.isEmpty = true` 时回答「这个月还没有记录」，而不是「花了 0 元」。`meta.isEmpty` 依据**区间内是否有任何记录（含中性记录）**，并跟随 `direction` / `categoryIds` 筛选；它不等同于 `summary.count === 0`。`meta.isEmpty` 只表示**区间内没有任何记录**（含退款/还款中性记录），因此可能与 `summary.count = 0` 同时出现「有记录但无收支」的情况。
 - 想回答「哪类花得最多」，直接读 `summary.topCategory`，不要遍历 `buckets` 自己排。
 
 ### 2.3 账单一览 `GET /api/transactions`
@@ -259,7 +259,7 @@
 
 ```jsonc
 {
-  "filter": { "categoryId": 1, "from": "2026-11-01", "to": "2026-11-30", "direction": "expense" },
+  "filter": { "categoryId": 1, "from": "2026-11-01", "to": "2026-11-30", "direction": "expense", "entryType": "normal" },
   "summary": { "count": 23, "expenseCents": 98000, "incomeCents": 0 },
   "items": [
     { "id": "tx_...", "amountCents": 3250, "merchant": "瑞幸咖啡",
@@ -469,7 +469,7 @@ POST /api/transactions/tx_xxx/void
 | 11 | 其他收入 | `#9CA3AF` | 利息、分红、基金、股票、理财、收益、报销 |
 | 12 | 贷款 | `#0EA5E9` | 贷款、借款、借到、放款、下款、借钱 |
 
-> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/还款**：金额等于原账单 → 作废原单 + 中性记录；金额小于原账单 → 把原单金额改为剩余金额 + 中性记录；金额大于原账单 → 作废原单 + 中性记录，超出部分按**收入（退款）/支出（还款）**入账。
+> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/还款**：金额等于原账单 → 作废原单 + 中性记录；金额小于原账单 → 把原单金额改为剩余金额 + 中性记录；金额大于原账单 → 作废原单 + 中性记录，超出部分按**收入（退款）/支出（还款）**入账。超出时会产生**两条记录**（中性记录 + 超出部分的 `normal` 记录），两条的 `note` 都是原始文本。
 
 ---
 

@@ -388,6 +388,116 @@ describe('POST /api/transactions/import', () => {
     expect(transactionCount()).toBe(before);
   });
 
+  it('还款小于贷款：调整原贷款金额并记中性', async () => {
+    const loan = await send([
+      record({ idempotencyKey: 'k-loan-partial', rawText: '贷款 1000 到账', amount: 1000, merchant: '某银行' })
+    ]);
+    const loanId = loan.body.results[0].transactionId as string;
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const repayment = await send([
+      record({
+        idempotencyKey: 'k-repayment-partial',
+        rawText: '还款 400',
+        amount: 400,
+        originalTransactionId: loanId
+      })
+    ]);
+    const item = repayment.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_AMOUNT_ADJUSTED',
+      severity: 'warning'
+    });
+
+    const loanRow = db
+      .prepare('SELECT amount_cents, status FROM transactions WHERE id = ?')
+      .get(loanId) as { amount_cents: number; status: string };
+    expect(loanRow).toEqual({ amount_cents: 60000, status: 'confirmed' });
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after.incomeCents).toBe(before.incomeCents - 40000);
+  });
+
+  it('已作废的原账单不可匹配', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-void-orig', rawText: '买鞋 100', amount: 100 })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    db.prepare("UPDATE transactions SET status = 'void' WHERE id = ?").run(originalId);
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-void-refund',
+        rawText: '退款 100',
+        amount: 100,
+        originalTransactionId: originalId
+      })
+    ]);
+    expect(refund.body.results[0].status).toBe('pending_followup');
+    expect(refund.body.results[0].feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_NOT_FOUND',
+      severity: 'blocking'
+    });
+  });
+
+  it('跨用户的原账单不可匹配', async () => {
+    db.prepare("INSERT OR IGNORE INTO users (id, nickname, created_at) VALUES ('u_002', 'u_002', ?)").run(
+      '2026-11-14T12:00:00+08:00'
+    );
+    db.prepare(
+      `INSERT INTO transactions
+         (id, user_id, direction, direction_source, amount_cents, merchant, note, occurred_at, occurred_date,
+          time_source, chat_at, category_id, category_source, category_confidence, status, source_modality,
+          source_ref, anomaly_flag, idempotency_key, created_at, updated_at)
+       VALUES ('tx_other_user', 'u_002', 'expense', 'explicit', 1000, '他人', NULL, '2026-11-14T12:00:00+08:00',
+               '2026-11-14', 'explicit', NULL, 1, 'rule', 0.9, 'confirmed', 'text', NULL, 0, 'key_other',
+               '2026-11-14T12:00:00+08:00', '2026-11-14T12:00:00+08:00')`
+    ).run();
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-cross-user',
+        rawText: '退款 10',
+        amount: 10,
+        originalTransactionId: 'tx_other_user'
+      })
+    ]);
+    expect(refund.body.results[0].status).toBe('pending_followup');
+    expect(refund.body.results[0].feedback).toContainEqual({
+      field: 'originalTransactionId',
+      code: 'ORIGINAL_NOT_FOUND',
+      severity: 'blocking'
+    });
+  });
+
+  it('entryType=repayment 返回还款中性记录', async () => {
+    const loan = await send([
+      record({ idempotencyKey: 'k-filter-loan', rawText: '贷款 200 到账', amount: 200, merchant: '某银行' })
+    ]);
+    const loanId = loan.body.results[0].transactionId as string;
+    await send([
+      record({
+        idempotencyKey: 'k-filter-repayment',
+        rawText: '还款 200',
+        amount: 200,
+        originalTransactionId: loanId
+      })
+    ]);
+
+    const response = await app.inject({ method: 'GET', url: '/api/transactions?entryType=repayment' });
+    const body = response.json() as { items: Array<{ entryType: string }>; summary: { count: number } };
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.every((item) => item.entryType === 'repayment')).toBe(true);
+    expect(body.summary.count).toBe(0);
+  });
+
   it('中性记录重发：duplicate 保留 matchedTransactionId', async () => {
     const original = await send([
       record({ idempotencyKey: 'k-dup-orig', rawText: '买书 100', amount: 100, merchant: '书店' })

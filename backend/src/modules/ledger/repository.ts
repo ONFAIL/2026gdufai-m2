@@ -251,7 +251,8 @@ export function adjustTransactionAmount(
   ).run(amountCents, updatedAt, id, userId);
 }
 
-/** 按 id 读取用户自己的原账单，用于退款/还款匹配。 */export function getTransactionById(db: Db, id: string, userId: string): OriginalTransaction | null {
+/** 按 id 读取用户自己的原账单，用于退款/还款匹配。 */
+export function getTransactionById(db: Db, id: string, userId: string): OriginalTransaction | null {
   const row = db
     .prepare(
       'SELECT id, occurred_at, direction, amount_cents, entry_type FROM transactions WHERE id = ? AND user_id = ? AND status != ?'

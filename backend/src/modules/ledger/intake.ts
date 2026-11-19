@@ -293,7 +293,7 @@ function handleSpecialEntry(
   categories: CategoryRow[],
   askedOriginal: boolean
 ): RecordResult {
-  let matched: { id: string; direction: Direction; amountCents: number } | null = null;
+  let matched: { id: string; amountCents: number } | null = null;
   if (record.originalTransactionId !== null) {
     const original = getTransactionById(db, record.originalTransactionId, record.userId);
     if (
@@ -301,7 +301,7 @@ function handleSpecialEntry(
       original.entryType === 'normal' &&
       withinMatchWindow(original.occurredAt, now)
     ) {
-      matched = { id: original.id, direction: original.direction, amountCents: original.amountCents };
+      matched = { id: original.id, amountCents: original.amountCents };
     }
   }
 

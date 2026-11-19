@@ -459,3 +459,19 @@
 - **验证**：git diff --check 无输出；仅文档变更
 - **人工审核**：待复审
 - **遗留问题**：无
+### LOG-Z_Wen-20261119-07
+
+- **时间**：2026-11-19 17:05（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
+- **任务**：按第五轮复审修契约文案与 P3 项
+- **关键提示词**：reviewer 指出 `REFUND_RECORDED_NEUTRAL` / `REPAYMENT_RECORDED_NEUTRAL` 话术与「已自动作废」不一致；P3 提到日志转义缺字
+- **代理做了什么**：
+  - 契约：两个反馈码话术改为「原账单已自动作废」；§2.3 明确 isEmpty 跟随筛选、filter 示例补 entryType；§3 说明超额产生两条记录；GLOSSARY 改为「自动作废或调整金额」
+  - 代码：删除 `matched.direction` 未使用字段；修正 `repository.ts` 注释与函数同行
+  - 测试：补部分还款、作废原单不可匹配、跨用户不可匹配、entryType=repayment，共 102 例
+  - 日志：本条更正历史条目中因终端转义丢失的字母（实际命令为 `typecheck` / `test`，字段为 `timeSource`），并补文件末尾换行
+- **决策**：不改写已提交日志条目，以本条目说明
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **102 例**
+- **人工审核**：待复审
+- **遗留问题**：PR 描述 diff 数字需按实际更新；#18 需补 v1.4 清单；#21 需勾选受影响方

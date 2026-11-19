@@ -57,7 +57,7 @@
 | 反馈码 | `code` | 见契约 1.5，如 `MISSING_AMOUNT`、`TIME_DEFAULTED_TO_CHAT_TIME` | 自造未登记的码 |
 | 严重度 | `severity` | `blocking` 阻断入库 / `warning` 已入库但需提示 | 「error/info」 |
 | 时间兜底 | time fallback | 第 2 轮起时间仍缺失或在未来，用 `chatAt`/`sentAt` 入库 | 「默认时间」 |
-| 退款 | refund | 记为中性记录（`entry_type='refund'`），保留但不计入收支；匹配到原账单时引导作废 | 「负支出」「退款收入」 |
+| 退款 | refund | 记为中性记录（`entry_type='refund'`），保留但不计入收支；匹配到原账单时自动作废原单或调整其金额 | 「负支出」「退款收入」 |
 | 中性记录 | neutral entry | `entry_type` 为 `refund` / `repayment` 的记录，保留可查但不计入收支统计 | 与「作废」混用 |
 
 ## 5. 账单与类别
