@@ -40,7 +40,11 @@ function insertTransaction(categoryId: number, status: 'confirmed' | 'void' = 'c
   return id;
 }
 
-async function request(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: unknown) {
+async function request(
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  url: string,
+  payload?: Record<string, unknown>
+) {
   const response = await app.inject({ method, url, payload });
   return { status: response.statusCode, body: response.statusCode === 204 ? null : response.json() };
 }
