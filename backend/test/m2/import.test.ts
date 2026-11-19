@@ -241,40 +241,35 @@ describe('POST /api/transactions/import', () => {
     expect(after.expenseCents).toBe(before.expenseCents);
   });
 
-  it('退款金额大于原账单：中性记录并提示核对', async () => {
+  it('退款金额大于原账单：不入库，首轮追问，重发 rejected', async () => {
     const original = await send([
       record({ idempotencyKey: 'k-exceed-orig', rawText: '买鞋 100', amount: 100 })
     ]);
     const originalId = original.body.results[0].transactionId as string;
-    const before = (
-      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
-    ).json().summary;
-
-    const refund = await send([
-      record({
-        idempotencyKey: 'k-exceed-refund',
-        rawText: '退款 500',
-        amount: 500,
-        originalTransactionId: originalId
-      })
-    ]);
-    const item = refund.body.results[0];
-    expect(item.status).toBe('confirmed');
-    expect(item.feedback).toContainEqual({
-      field: 'amount',
-      code: 'REFUND_EXCEEDS_ORIGINAL',
-      severity: 'warning'
+    const before = transactionCount();
+    const payload = record({
+      idempotencyKey: 'k-exceed-refund',
+      rawText: '退款 500',
+      amount: 500,
+      originalTransactionId: originalId
     });
 
-    const row = db
-      .prepare('SELECT entry_type FROM transactions WHERE id = ?')
-      .get(item.transactionId) as { entry_type: string };
-    expect(row.entry_type).toBe('refund');
+    const first = await send([payload]);
+    expect(first.body.results[0].status).toBe('pending_followup');
+    expect(first.body.results[0].feedback).toContainEqual({
+      field: 'amount',
+      code: 'REFUND_EXCEEDS_ORIGINAL',
+      severity: 'blocking'
+    });
+    expect(transactionCount()).toBe(before);
 
-    const after = (
-      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
-    ).json().summary;
-    expect(after).toEqual(before);
+    const second = await send([payload]);
+    expect(second.body.results[0].status).toBe('pending_followup');
+    expect(transactionCount()).toBe(before);
+
+    const third = await send([payload]);
+    expect(third.body.results[0].status).toBe('rejected');
+    expect(transactionCount()).toBe(before);
   });
 
   it('还款匹配到贷款账单：中性记录，方向为支出，不计收支', async () => {

@@ -155,7 +155,7 @@
 | `REFUND_RECORDED_NEUTRAL` | 退款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请到账单一览作废原账单」 |
 | `REPAYMENT_RECORDED_NEUTRAL` | 还款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请作废原贷款账单」 |
 | `ORIGINAL_NOT_FOUND_RECORDED` | 未匹配到原账单，已归入「其他/其他收入」 | warning | 「没找到原账单，已记为其他且不计收支」 |
-| `REFUND_EXCEEDS_ORIGINAL` | 退款金额大于原账单 | warning | 「退款金额比原账单还高，请核对退款金额」 |
+| `REFUND_EXCEEDS_ORIGINAL` | 退款金额大于原账单，**不入库** | blocking | 「退款金额比原账单还高，请核对退款金额」 |
 | `PARTIAL_REFUND_AS_INCOME` | 退款金额小于原账单，已按收入入账 | warning | 「已按部分退款计入收入」 |
 
 > `MISSING_DIRECTION`：兜底到「其他」视为类别识别成功，**不返回该码**；该码保留但当前不可达，存废由 issue #12 决议。
@@ -468,7 +468,7 @@ POST /api/transactions/tx_xxx/void
 | 11 | 其他收入 | `#9CA3AF` | 利息、分红、基金、股票、理财、收益、报销 |
 | 12 | 贷款 | `#0EA5E9` | 贷款、借款、借到、放款、下款、借钱 |
 
-> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/退货**：金额等于原账单记为中性记录（`entry_type='refund'`，不计收支，引导作废原单）；金额小于原账单按**收入**入账（`entry_type='normal'`，类别「其他收入」）；金额大于原账单仍记中性并提示核对。
+> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/退货**：金额等于原账单记为中性记录（`entry_type='refund'`，不计收支，引导作废原单）；金额小于原账单按**收入**入账（`entry_type='normal'`，类别「其他收入」）；金额大于原账单**不入库**：首轮追问，重发仍未改则 `rejected`。
 
 ---
 
@@ -483,7 +483,7 @@ POST /api/transactions/tx_xxx/void
 - [ ] 同一 `idempotencyKey` 重发 → `duplicate`，账单数不变
 - [ ] 方向与类别冲突 → 首轮 `CATEGORY_KIND_MISMATCH`，第二轮按类别覆盖
 - [x] 文本含「退款」→ 不带 id 首轮 `MISSING_ORIGINAL_TRANSACTION`；带无效 id 首轮 `ORIGINAL_NOT_FOUND`；次轮 → 中性记录 `entry_type='refund'`
-- [x] 退款金额等于原单 → 中性；小于原单 → 收入（`PARTIAL_REFUND_AS_INCOME`）；大于原单 → 中性 + `REFUND_EXCEEDS_ORIGINAL`
+- [x] 退款金额等于原单 → 中性；小于原单 → 收入（`PARTIAL_REFUND_AS_INCOME`）；大于原单 → 不入库，首轮 `REFUND_EXCEEDS_ORIGINAL`，重发仍超则 `rejected`
 - [ ] 缺 `sentAt` → 整批 `INVALID_BATCH`
 - [ ] 入站 `userId` 与 `DEMO_USER_ID` 不一致 → 整批 `INVALID_BATCH`
 

@@ -410,3 +410,19 @@
 - **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **96 例**；git diff --check 无输出
 - **人工审核**：待复审
 - **遗留问题**：新增 2 个反馈码需在 contract-change issue 登记（#16 或新开）
+### LOG-Z_Wen-20261119-03
+
+- **时间**：2026-11-19 12:25（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
+- **任务**：按用户决定把「退款大于原账单」改为不入库
+- **关键提示词**：「退款>原账单，不能入库」
+- **代理做了什么**：
+  - handleSpecialEntry：退款/还款金额大于原账单时返回 pending_followup + blocking REFUND_EXCEEDS_ORIGINAL，不写账单；
+  - 重发仍超则按轮次转 ejected；
+  - 契约 §1.5 严重度改 blocking、§3 口径与 §4 用例同步；
+  - 测试改为「首轮 pending、次轮 pending、第三次 rejected，账单数不变」。
+- **决策**：超额退款一律不入库，避免污染收支
+- **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **96 例**；git diff --check 无输出
+- **人工审核**：待复审
+- **遗留问题**：7 个反馈码需在 contract-change issue 登记

@@ -273,6 +273,18 @@ function handleSpecialEntry(
     const exceeds = resolved.amountCents > matched.amountCents;
     const partialRefund = kind === 'refund' && resolved.amountCents < matched.amountCents;
 
+    if (exceeds) {
+      // 退款金额大于原账单：不入库，先追问核对；重发仍未改则 rejected。
+      return persistPending(
+        db,
+        batch,
+        record,
+        round,
+        [...timeFeedback, blocking('amount', 'REFUND_EXCEEDS_ORIGINAL')],
+        round >= MAX_FOLLOWUP_ROUNDS
+      );
+    }
+
     if (partialRefund) {
       // 部分退款按收入入账（entry_type=normal），与原账单支出相抵。
       const category =
@@ -294,9 +306,6 @@ function handleSpecialEntry(
     // 中性记录方向只由类型决定：退款 = 收入，还款 = 支出。
     const direction: Direction = kind === 'refund' ? 'income' : 'expense';
     const extra = [...timeFeedback];
-    if (exceeds) {
-      extra.push(warning('amount', 'REFUND_EXCEEDS_ORIGINAL'));
-    }
     extra.push(
       warning(
         'originalTransactionId',
