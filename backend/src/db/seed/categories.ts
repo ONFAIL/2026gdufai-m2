@@ -37,7 +37,7 @@ export const PRESET_CATEGORIES: readonly SeedCategory[] = [
   { id: 12, name: '贷款', kind: 'income', color: '#0EA5E9', icon: '🏦', sortOrder: 12,
     keywords: ['贷款', '借款', '借到', '放款', '下款', '借钱'] },
   { id: 13, name: '贷款利息', kind: 'expense', color: '#6366F1', icon: '🧾', sortOrder: 13,
-    keywords: ['贷款利息', '借款利息', '房贷利息', '还款利息', '利息支出', '分期利息'] }
+    keywords: ['贷款利息', '借款利息', '房贷利息', '还款利息', '利息支出', '分期利息', '还利息', '付利息', '还息'] }
 ];
 
 /** 幂等写入预设类别：已存在则跳过，不覆盖用户改过的颜色或关键词。 */

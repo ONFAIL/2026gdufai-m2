@@ -86,7 +86,9 @@
 | `sourceRef` | 记录 | 否 | string \| `null` | 语音/图片文件路径，**不要把文件内容 base64 塞进 JSON** |
 | `confidence` | 记录 | 否 | number 0–1 \| `null` | 模块 1 对整条抽取的置信度，仅作参考 |
 | `idempotencyKey` | 记录 | 是 | string | **同一笔重发必须相同**，模块 2 据此去重 |
-| `repaymentPart` | 记录 | 否 | `"principal"` \| `"interest"` \| `"mixed"` \| `null` | 贷款还款的本金/利息属性；`interest` 表示纯利息支付，不进入中性还款流程；不传时按关键词兜底 |
+| `repaymentPart` | 记录 | 否 | `"principal"` \| `"interest"` \| `"mixed"` \| `null` | 贷款还款的本金/利息属性，仅作提示；`interest` 表示纯利息支付，不进入中性还款流程；不传时按关键词兜底 |
+| `principalCents` | 记录 | 否 | integer ≥ 0 \| `null` | 本次还款中的本金（分）；与 `interestCents` 之和必须等于 `yuanToCents(amount)` |
+| `interestCents` | 记录 | 否 | integer ≥ 0 \| `null` | 本次还款中的利息（分）；只生成类别 13 的支出，不参与剩余本金计算 |
 
 > **关于 `direction` 可以传 `null`**：`null` 只出现在**入站**，含义是「模块 1 没有判定」，不是脏数据。模块 2 收到后按优先级解析：类别能识别就用类别 kind 推断；类别也识别不出时兜底到「其他」并按 `expense` 推断。`MISSING_DIRECTION` 保留但当前不可达（见 §1.5），因此 **`transactions.direction` 是非空字段，入库前方向必然已经确定**，不存在把 `null` 写进库的路径。
 >
@@ -116,6 +118,8 @@
 ```
 
 `matchedTransactionId`：匹配到的原账单 id；未匹配或普通记账为 `null`。
+
+`interestTransactionId`：本次还款产生的利息记录 id；无利息为 `null`。
 
 `status` 四种取值：
 
@@ -162,6 +166,7 @@
 | `ORIGINAL_TRANSACTION_AGED` | 原账单距今超过 365 天，仍匹配成功 | warning | 「这笔原账单较早，请确认」 |
 | `PARTIAL_REPAYMENT_RECORDED` | 贷款部分还款，尚未结清 | warning | 「已记录本次还款，贷款尚未结清」 |
 | `AMBIGUOUS_LOAN_PAYMENT` | 本金/利息无法区分 | blocking | 「这笔是还本金还是还利息？」 |
+| `ORIGINAL_ALREADY_SETTLED` | 原贷款已结清 | blocking | 「这笔贷款已结清，无需再还款」 |
 
 > `MISSING_DIRECTION`：兜底到「其他」视为类别识别成功，**不返回该码**；该码保留但当前不可达，存废由 issue #12 决议。
 >
@@ -476,7 +481,23 @@ POST /api/transactions/tx_xxx/void
 
 > 自定义类别从 **14** 起自增；预设 13 冻结占用。类别 13 的关键词**不包含裸「利息」**，避免与类别 11「其他收入」竞争。
 
-> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/还款**：金额等于原账单 → 作废原单 + 中性记录；金额小于原账单 → 把原单金额改为剩余金额 + 中性记录；金额大于原账单 → 作废原单 + 中性记录，超出部分按**收入（退款）/支出（还款）**入账。超出时会产生**两条记录**（中性记录 + 超出部分的 `normal` 记录），两条的 `note` 都是原始文本。
+> 口径说明（v1.5）：**转账计入收入**；**贷款计入收入**；**退款**保持 v1.4 三态（等额作废 / 小于调整原单金额 / 大于作废 + 超出记收入）；**还款**保留原贷款、写 `settled_at`、不改原单金额。
+>
+> 还款计算：
+>
+> ```text
+> outstandingCents = 原贷款金额 - SUM(principal_cents)
+> diffCents = (principalCents ?? yuanToCents(amount)) - outstandingCents
+> ```
+>
+> - `diffCents = 0`：写 `settled_at`，返回 `REPAYMENT_RECORDED_NEUTRAL`；
+> - `diffCents < 0`：返回 `PARTIAL_REPAYMENT_RECORDED`；
+> - `diffCents > 0`：`principalCents` 超过剩余本金，返回 `INVALID_BATCH`（`field: records[i].principalCents`）；
+> - `interestCents` 只生成类别 13 的 `entry_type='normal'` 支出，**不参与** `outstanding`、`settled_at`、超额判断；
+> - 未提供拆分且 `amount > outstandingCents`：返回 `AMBIGUOUS_LOAN_PAYMENT`，要求拆分；
+> - 退款超额仍产生两条记录：中性记录 + 超出部分的 `normal` 记录。
+>
+> **现金流口径**：贷款本金记收入、还款本金记中性、利息记支出，`netCents` 不等于损益；真正的负债/损益模型留给后续 `loans` 维度。
 >
 > **v1.5 预告**：贷款还款的「作废/改额」口径将调整为「保留原单 + 结清标记」，见 #22；v1.4 先按本表执行，退款逻辑不受该调整影响。
 
@@ -515,7 +536,7 @@ POST /api/transactions/tx_xxx/void
    - v1.2：`occurredAt` 要求真实日历日期，拒绝 `2026-02-31` 这类 V8 会静默滚动的输入；
    - v1.3：退款/还款改为中性记录（`entry_type`），保留但不计入收支；移除 `REFUND_NOT_SUPPORTED`，新增 5 个反馈码；`summary` 恒只统计 normal，`meta.isEmpty` 依据区间是否有任何记录；
    - v1.4：退款/还款按金额三态——等额作废原单，少于原单调整原单金额，超出部分记收入（退款）/支出（还款）；新增 `ORIGINAL_AMOUNT_ADJUSTED`、`REFUND_EXCESS_AS_INCOME`、`REPAYMENT_EXCESS_AS_EXPENSE` 三个反馈码。
-   - v1.5：新增预设类别 13「贷款利息」（自定义从 14 起）、入站 `repaymentPart`、`settled_at` 结清标记；贷款还款改为保留原单并标记结清（2C），显式原单匹配取消 30 天上限（1D）；新增 `ORIGINAL_TRANSACTION_AGED`、`PARTIAL_REPAYMENT_RECORDED`、`AMBIGUOUS_LOAN_PAYMENT`。
+   - v1.5：新增预设类别 13「贷款利息」（自定义从 14 起）、入站 `repaymentPart` / `principalCents` / `interestCents`、`settled_at` 结清标记；贷款还款改为保留原单并标记结清（2C），显式原单匹配取消 30 天上限（1D）；新增 `ORIGINAL_TRANSACTION_AGED`、`PARTIAL_REPAYMENT_RECORDED`、`AMBIGUOUS_LOAN_PAYMENT`、`ORIGINAL_ALREADY_SETTLED`；明确现金流口径。
 2. 模块 2 的实现在 `backend/` 下，接口以本文档为准；代码合并后如有差异，以代码为准并同步更新本文档。
 3. 模块 1 / 3 需要新增字段或接口（比如「按商户统计」），先在群里提，确认后由模块 2 加，**不要各自约定后直接改**。
 4. 联调问题优先带三样东西：`batchId` / `recordId` / 接口返回原文，方便直接查 `intake_log`。
