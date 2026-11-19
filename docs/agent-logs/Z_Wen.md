@@ -492,3 +492,19 @@
 - **验证**：`typecheck` / `lint` / `test` 全绿，backend 16 文件 **103 例**
 - **人工审核**：待开 PR
 - **遗留问题**：PR-B（纯利息旁路）与 PR-C（1D/2C）未做；等 #17 合并后 rebase
+### LOG-Z_Wen-20261119-10
+
+- **时间**：2026-11-19 22:50（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-loan-interest-a` / 待建
+- **任务**：按 #22/#23 定稿更新 PR-A
+- **关键提示词**：reviewer 要求补 principal_cents、同名迁移、关键词、契约 v1.5 定稿
+- **代理做了什么**：
+  - 迁移 003 增加 `principal_cents`；同名自定义「贷款利息」先重命名再迁 ID
+  - seed 类别 13 关键词补 `还利息 / 付利息 / 还息`
+  - 契约：补 `principalCents` / `interestCents`、`interestTransactionId`、`ORIGINAL_ALREADY_SETTLED`；§3 写死 diff 公式、利息不参与结算、本金超额拒收、现金流口径；§5.1 更新
+  - 迁移测试：补同名自定义用例与 legacy `principal_cents` 断言
+- **决策**：本金超额直接 `INVALID_BATCH`，不做截断；利息不参与 outstanding
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 16 文件 **104 例**
+- **人工审核**：待开 PR
+- **遗留问题**：PR-B / PR-C 未做；等 #17 合并后 rebase

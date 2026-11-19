@@ -2,6 +2,7 @@
 -- 1) transactions 增加 settled_at（原贷款结清时间，可空）
 -- 2) 若 13 已被自定义类别占用，先整体迁移到 MAX(id)+1，再插入预设 13
 ALTER TABLE transactions ADD COLUMN settled_at TEXT;
+ALTER TABLE transactions ADD COLUMN principal_cents INTEGER;
 
 PRAGMA defer_foreign_keys = ON;
 
@@ -11,6 +12,11 @@ SELECT CASE
     THEN (SELECT COALESCE(MAX(id), 12) + 1 FROM categories)
   ELSE 13
 END AS new_id;
+
+-- 同名自定义类别先把名字让出来，避免 UNIQUE(kind, name) 让预设 13 被跳过
+UPDATE categories
+   SET name = name || '(旧)'
+ WHERE id = 13 AND is_preset = 0 AND kind = 'expense' AND name = '贷款利息';
 
 UPDATE categories
    SET id = (SELECT new_id FROM _preset13_migration)

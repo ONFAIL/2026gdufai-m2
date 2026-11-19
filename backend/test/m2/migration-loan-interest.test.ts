@@ -75,10 +75,12 @@ describe('迁移 003：贷款利息类别', () => {
     };
     expect(custom).toEqual({ id: 14, name: '宠物', is_preset: 0 });
 
-    const tx = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get('tx_legacy') as {
+    const tx = db.prepare('SELECT category_id, principal_cents FROM transactions WHERE id = ?').get('tx_legacy') as {
       category_id: number;
+      principal_cents: number | null;
     };
     expect(tx.category_id).toBe(14);
+    expect(tx.principal_cents).toBeNull();
 
     const budget = db.prepare('SELECT category_id FROM budgets').get() as { category_id: number };
     expect(budget.category_id).toBe(14);
@@ -89,6 +91,42 @@ describe('迁移 003：贷款利息类别', () => {
     expect(rule.category_id).toBe(14);
 
     expect(Number(db.pragma('user_version', { simple: true }))).toBe(3);
+    db.close();
+  });
+
+  it('旧库同名自定义「贷款利息」先重命名，再迁移到 14', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'm2-migration-same-'));
+    dirs.push(dir);
+    const path = join(dir, 'legacy.db');
+
+    const raw = new Database(path);
+    raw.exec(readFileSync(join(migrationsDir, '001_init.sql'), 'utf8'));
+    raw.exec(readFileSync(join(migrationsDir, '002_refund_neutral.sql'), 'utf8'));
+    raw.pragma('user_version = 2');
+    raw
+      .prepare(
+        "INSERT INTO users (id, nickname, created_at) VALUES ('u_001', 'u_001', '2026-11-01T00:00:00+08:00')"
+      )
+      .run();
+    raw
+      .prepare(
+        `INSERT INTO categories (id, name, kind, keywords, color, icon, sort_order, is_preset, is_active, created_at)
+         VALUES (13, '贷款利息', 'expense', '[]', '#000000', '🧾', 13, 0, 1, '2026-11-01T00:00:00+08:00')`
+      )
+      .run();
+    raw.close();
+
+    const db = openDatabase(path);
+    const preset = db.prepare('SELECT name, is_preset FROM categories WHERE id = 13').get() as {
+      name: string;
+      is_preset: number;
+    };
+    expect(preset).toEqual({ name: '贷款利息', is_preset: 1 });
+
+    const legacy = db
+      .prepare('SELECT id, name, is_preset FROM categories WHERE name = ?')
+      .get('贷款利息(旧)') as { id: number; name: string; is_preset: number };
+    expect(legacy).toEqual({ id: 14, name: '贷款利息(旧)', is_preset: 0 });
     db.close();
   });
 });
