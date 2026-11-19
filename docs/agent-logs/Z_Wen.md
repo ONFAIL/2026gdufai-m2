@@ -475,3 +475,20 @@
 - **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **102 例**
 - **人工审核**：待复审
 - **遗留问题**：PR 描述 diff 数字需按实际更新；#18 需补 v1.4 清单；#21 需勾选受影响方
+### LOG-Z_Wen-20261119-09
+
+- **时间**：2026-11-19 21:10（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-loan-interest-a` / 待建
+- **任务**：v1.5 PR-A——迁移 003、预设类别 13、契约 v1.5
+- **关键提示词**：用户要求 B+C 并行；PR-A 基于 #17 head `64e58c9` 堆叠
+- **代理做了什么**：
+  - `003_loan_interest.sql`：`transactions.settled_at`；自定义 13 整体迁到 `MAX(id)+1`，`defer_foreign_keys` 保证子表引用可更新；插入预设 13
+  - `seed/categories.ts`：新增 ID 13「贷款利息」，自定义从 14 起
+  - 契约：升 v1.5（引用 #23），补 `repaymentPart`、3 个新反馈码、类别 13、`settledAt`、v1.5 变更说明
+  - GLOSSARY：贷款利息、已结清
+  - 测试：db/categories 计数改 13/9，classifier 自定义类别改 14，新增「旧库自定义 13 迁移」用例
+- **决策**：不用 `status='settled'`，用 `settled_at`，避免破坏 `status='confirmed'` 查询
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 16 文件 **103 例**
+- **人工审核**：待开 PR
+- **遗留问题**：PR-B（纯利息旁路）与 PR-C（1D/2C）未做；等 #17 合并后 rebase

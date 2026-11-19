@@ -59,6 +59,8 @@
 | 时间兜底 | time fallback | 第 2 轮起时间仍缺失或在未来，用 `chatAt`/`sentAt` 入库 | 「默认时间」 |
 | 退款 | refund | 记为中性记录（`entry_type='refund'`），保留但不计入收支；匹配到原账单时自动作废原单或调整其金额 | 「负支出」「退款收入」 |
 | 中性记录 | neutral entry | `entry_type` 为 `refund` / `repayment` 的记录，保留可查但不计入收支统计 | 与「作废」混用 |
+| 贷款利息 | loan interest | 预设类别 13（expense）；关键词不含裸「利息」 | 「利息收入」 |
+| 已结清 | settled | 原贷款 `settled_at` 非空，不能再被还款匹配 | 与 `status='void'` 混用 |
 
 ## 5. 账单与类别
 
