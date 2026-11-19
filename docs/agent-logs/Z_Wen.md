@@ -508,3 +508,17 @@
 - **验证**：`typecheck` / `lint` / `test` 全绿，backend 16 文件 **104 例**
 - **人工审核**：待开 PR
 - **遗留问题**：PR-B / PR-C 未做；等 #17 合并后 rebase
+### LOG-Z_Wen-20261120-01
+
+- **时间**：2026-11-20 00:20（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-loan-interest-a` / #27
+- **任务**：修复 PR #27 的 CI 失败（前端反馈码未同步 v1.5）
+- **关键提示词**：PR #27 verify job 失败，本地复现为 frontend `verify2` / `bugtest` 反馈码集合不一致
+- **代理做了什么**：
+  - `packages/capture-flow/src/feedback.ts` 补 v1.5 的 4 个码：`ORIGINAL_TRANSACTION_AGED`、`PARTIAL_REPAYMENT_RECORDED`、`AMBIGUOUS_LOAN_PAYMENT`、`ORIGINAL_ALREADY_SETTLED`
+  - 新增话术条目，供前端与确认流程复用
+- **决策**：这是契约 v1.5 的最小跨模块同步，归入 #18 的剩余前端工作；已在 PR 描述中 @ 前端负责人
+- **验证**：`pnpm -r typecheck` / `lint` / `test` / `build` 全绿（frontend 73 例、backend 187 例）
+- **人工审核**：待 CI 重跑
+- **遗留问题**：前端类别 13 / mock / `settledAt` 等仍在 #18
