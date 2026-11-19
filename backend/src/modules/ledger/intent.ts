@@ -16,8 +16,3 @@ export function detectSpecialEntry(rawText: string): SpecialEntry | null {
   }
   return null;
 }
-
-/** 判断是否为退款/退货文本。 */
-export function isRefund(rawText: string): boolean {
-  return detectSpecialEntry(rawText) === 'refund';
-}

@@ -376,3 +376,19 @@
 - **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **91 例**；git diff --check 无输出
 - **人工审核**：待复审
 - **遗留问题**：前端同步由 #18 跟踪；退款金额超过原单的告警与中性记录唯一冲突自愈未做（P3）
+### LOG-Z_Wen-20261119-01
+
+- **时间**：2026-11-19 12:05（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17（第四轮复审修复）
+- **任务**：修复 isEmpty 忽略筛选的回归，并订正契约与清理死代码
+- **关键提示词**：reviewer 指出 hasAnyRecord 未带 direction/categoryIds 筛选；契约反馈码数量写错；isRefund 无调用方
+- **代理做了什么**：
+  - stats.ts：hasAnyRecord 带上 direction / categoryIds 条件（仍不含 entry_type），补「只有中性记录」与「direction 筛选无匹配」两条用例
+  - 契约 §5.1 反馈码数量改为 5 并列出；§1.5 补中性记录方向与 direction_source 口径
+  - 删除 intent.ts 中无生产调用的 isRefund 及测试引用
+  - 新增「中性记录未来时间次轮回退聊天时间」用例，断言 	ime_source / chat_at
+- **决策**：isEmpty 跟随筛选条件，但中性记录仍算「有记录」
+- **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **94 例**；git diff --check 无输出
+- **人工审核**：待复审
+- **遗留问题**：退款金额超原单告警、中性记录唯一冲突自愈未实现，需另开 issue

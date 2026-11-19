@@ -157,6 +157,8 @@
 | `ORIGINAL_NOT_FOUND_RECORDED` | 未匹配到原账单，已归入「其他/其他收入」 | warning | 「没找到原账单，已记为其他且不计收支」 |
 
 > `MISSING_DIRECTION`：兜底到「其他」视为类别识别成功，**不返回该码**；该码保留但当前不可达，存废由 issue #12 决议。
+>
+> 中性记录的方向固定：退款为 `income`、还款为 `expense`；`direction_source` 记 `category`（方向由 `entry_type` 推导，不取原账单方向）。
 
 ### 1.6 追问轮次怎么算
 
@@ -498,7 +500,7 @@ POST /api/transactions/tx_xxx/void
    - v1.2：`DUPLICATE_RECORD` 严重度由 `blocking` 改为 `warning`，与 §1.4「按成功处理」一致；
    - v1.2：`FUTURE_TIME` 增加 5 分钟时钟容差，把「未来」的判定边界写死；
    - v1.2：`occurredAt` 要求真实日历日期，拒绝 `2026-02-31` 这类 V8 会静默滚动的输入；
-   - v1.3：退款/还款改为中性记录（`entry_type`），保留但不计入收支；移除 `REFUND_NOT_SUPPORTED`，新增 `ORIGINAL_NOT_FOUND` 等 4 个反馈码；`summary` 恒只统计 normal，`meta.isEmpty` 依据区间是否有任何记录。
+   - v1.3：退款/还款改为中性记录（`entry_type`），保留但不计入收支；移除 `REFUND_NOT_SUPPORTED`，新增 `ORIGINAL_NOT_FOUND` 等 **5 个**反馈码（`MISSING_ORIGINAL_TRANSACTION`、`ORIGINAL_NOT_FOUND`、`REFUND_RECORDED_NEUTRAL`、`REPAYMENT_RECORDED_NEUTRAL`、`ORIGINAL_NOT_FOUND_RECORDED`）；`summary` 恒只统计 normal，`meta.isEmpty` 依据区间是否有任何记录。
 2. 模块 2 的实现在 `backend/` 下，接口以本文档为准；代码合并后如有差异，以代码为准并同步更新本文档。
 3. 模块 1 / 3 需要新增字段或接口（比如「按商户统计」），先在群里提，确认后由模块 2 加，**不要各自约定后直接改**。
 4. 联调问题优先带三样东西：`batchId` / `recordId` / 接口返回原文，方便直接查 `intake_log`。

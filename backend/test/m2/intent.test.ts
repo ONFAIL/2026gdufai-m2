@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectSpecialEntry, isRefund } from '../../src/modules/ledger/intent.ts';
+import { detectSpecialEntry } from '../../src/modules/ledger/intent.ts';
 
 describe('退款/还款意图识别', () => {
   it('识别退款相关文本', () => {
@@ -17,7 +17,6 @@ describe('退款/还款意图识别', () => {
   it('普通消费不误判', () => {
     for (const text of ['瑞幸 32.5', '工资到账 8000', '超市买菜 45']) {
       expect(detectSpecialEntry(text)).toBeNull();
-      expect(isRefund(text)).toBe(false);
     }
   });
 });

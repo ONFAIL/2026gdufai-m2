@@ -255,6 +255,38 @@ describe('POST /api/transactions/import', () => {
     expect(again.body.results[0].matchedTransactionId).toBe(originalId);
   });
 
+  it('中性记录未来时间次轮回退聊天时间，time_source/chat_at 与响应一致', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-future-orig', rawText: '买书 100', amount: 100, merchant: '书店' })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    const payload = record({
+      idempotencyKey: 'k-future-refund',
+      rawText: '退款 100',
+      amount: 100,
+      originalTransactionId: originalId,
+      occurredAt: '2030-01-01T12:00:00+08:00'
+    });
+
+    const first = await send([payload]);
+    expect(first.body.results[0].status).toBe('pending_followup');
+    expect(first.body.results[0].feedback).toContainEqual({
+      field: 'occurredAt',
+      code: 'FUTURE_TIME',
+      severity: 'blocking'
+    });
+
+    const second = await send([payload]);
+    const item = second.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.occurredAt).toBe(SENT_AT);
+
+    const row = db
+      .prepare('SELECT time_source, chat_at FROM transactions WHERE id = ?')
+      .get(item.transactionId) as { time_source: string; chat_at: string | null };
+    expect(row).toEqual({ time_source: 'chat_time', chat_at: SENT_AT });
+  });
+
   it('退款没带原账单 id：首轮追问，次轮归入其他且不计收支', async () => {
     const key = 'k-refund-no-original';
     const first = await send([record({ idempotencyKey: key, rawText: '退款 50', amount: 50 })]);

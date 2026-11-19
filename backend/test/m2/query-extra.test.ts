@@ -63,10 +63,13 @@ db.prepare(
      (id, user_id, direction, direction_source, amount_cents, merchant, note, occurred_at, occurred_date,
       time_source, chat_at, category_id, category_source, category_confidence, status, source_modality,
       source_ref, anomaly_flag, idempotency_key, entry_type, matched_transaction_id, created_at, updated_at)
-   VALUES ('tx_extra_refund', ?, 'income', 'category', 500, '测试商户', '退款', '2026-11-20T12:00:00+08:00',
-           '2026-11-20', 'explicit', NULL, 11, 'fallback', 0.3, 'confirmed', 'text', NULL, 0, 'key_refund',
-           'refund', NULL, '2026-11-20T12:00:00+08:00', '2026-11-20T12:00:00+08:00')`
+   VALUES ('tx_extra_refund', ?, 'income', 'category', 500, '测试商户', '退款', '2026-10-05T12:00:00+08:00',
+           '2026-10-05', 'explicit', NULL, 11, 'fallback', 0.3, 'confirmed', 'text', NULL, 0, 'key_refund',
+           'refund', NULL, '2026-10-05T12:00:00+08:00', '2026-10-05T12:00:00+08:00')`
 ).run(USER);
+
+// 某月只有收入，用于 direction 筛选下的 isEmpty 用例
+insert({ date: '2026-08-10', direction: 'income', amountCents: 100000, categoryId: 9 });
 
 afterAll(async () => {
   await app.close();
@@ -103,6 +106,18 @@ describe('统计补充用例', () => {
     const { body } = await getJson('/api/stats?dimension=month&month=2025-01');
     expect(body.meta.isEmpty).toBe(true);
     expect(body.summary).toMatchObject({ expenseCents: 0, incomeCents: 0, count: 0 });
+  });
+
+  it('只有中性记录的月份：isEmpty=false 但 summary.count=0', async () => {
+    const { body } = await getJson('/api/stats?dimension=month&month=2026-10');
+    expect(body.meta.isEmpty).toBe(false);
+    expect(body.summary).toMatchObject({ expenseCents: 0, incomeCents: 0, count: 0 });
+  });
+
+  it('direction 筛选下无匹配记录时 isEmpty=true', async () => {
+    const { body } = await getJson('/api/stats?dimension=month&month=2026-08&direction=expense');
+    expect(body.meta.isEmpty).toBe(true);
+    expect(body.summary).toMatchObject({ expenseCents: 0, count: 0 });
   });
 
   it('userId 查询参数不改变结果', async () => {
