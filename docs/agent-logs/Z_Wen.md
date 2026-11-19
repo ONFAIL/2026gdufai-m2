@@ -392,3 +392,21 @@
 - **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **94 例**；git diff --check 无输出
 - **人工审核**：待复审
 - **遗留问题**：退款金额超原单告警、中性记录唯一冲突自愈未实现，需另开 issue
+### LOG-Z_Wen-20261119-02
+
+- **时间**：2026-11-19 12:15（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-refund-neutral3` / #17
+- **任务**：按用户决定实现「只支持全额退款」的金额口径
+- **关键提示词**：「只支持全额退款；退款大于原账单提示请核对退款金额；退款小于原账单计入收入」
+- **代理做了什么**：
+  - 退款金额等于原单 → 中性记录（不变）
+  - 退款金额小于原单 → 按收入入账（entry_type='normal'、direction=income、类别「其他收入」），带 PARTIAL_REFUND_AS_INCOME warning
+  - 退款金额大于原单 → 仍记中性，带 REFUND_EXCEEDS_ORIGINAL warning
+  - insertNeutral 增加 entryType 参数，支持部分退款走 normal
+  - 契约：§1.5 增 2 个反馈码、§3 口径、§4 用例、§5.1 数量改 7
+  - 测试：部分退款计入收入、超额退款中性并提示
+- **决策**：部分退款不再引导作废原单，直接以收入与原支出相抵，统计结果正确
+- **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **96 例**；git diff --check 无输出
+- **人工审核**：待复审
+- **遗留问题**：新增 2 个反馈码需在 contract-change issue 登记（#16 或新开）

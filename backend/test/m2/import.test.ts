@@ -201,6 +201,82 @@ describe('POST /api/transactions/import', () => {
     expect(after).toEqual(before);
   });
 
+  it('退款金额小于原账单：按收入入账并计入统计', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-partial-orig', rawText: '买鞋 100', amount: 100 })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-partial-refund',
+        rawText: '退款 30',
+        amount: 30,
+        originalTransactionId: originalId
+      })
+    ]);
+    const item = refund.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.direction).toBe('income');
+    expect(item.category).toMatchObject({ id: 11, name: '其他收入' });
+    expect(item.feedback).toContainEqual({
+      field: 'amount',
+      code: 'PARTIAL_REFUND_AS_INCOME',
+      severity: 'warning'
+    });
+    expect(item.matchedTransactionId).toBe(originalId);
+
+    const row = db
+      .prepare('SELECT entry_type FROM transactions WHERE id = ?')
+      .get(item.transactionId) as { entry_type: string };
+    expect(row.entry_type).toBe('normal');
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after.incomeCents - before.incomeCents).toBe(3000);
+    expect(after.expenseCents).toBe(before.expenseCents);
+  });
+
+  it('退款金额大于原账单：中性记录并提示核对', async () => {
+    const original = await send([
+      record({ idempotencyKey: 'k-exceed-orig', rawText: '买鞋 100', amount: 100 })
+    ]);
+    const originalId = original.body.results[0].transactionId as string;
+    const before = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+
+    const refund = await send([
+      record({
+        idempotencyKey: 'k-exceed-refund',
+        rawText: '退款 500',
+        amount: 500,
+        originalTransactionId: originalId
+      })
+    ]);
+    const item = refund.body.results[0];
+    expect(item.status).toBe('confirmed');
+    expect(item.feedback).toContainEqual({
+      field: 'amount',
+      code: 'REFUND_EXCEEDS_ORIGINAL',
+      severity: 'warning'
+    });
+
+    const row = db
+      .prepare('SELECT entry_type FROM transactions WHERE id = ?')
+      .get(item.transactionId) as { entry_type: string };
+    expect(row.entry_type).toBe('refund');
+
+    const after = (
+      await app.inject({ method: 'GET', url: '/api/stats?dimension=month&month=2026-11' })
+    ).json().summary;
+    expect(after).toEqual(before);
+  });
+
   it('还款匹配到贷款账单：中性记录，方向为支出，不计收支', async () => {
     const loan = await send([
       record({ idempotencyKey: 'k-loan', rawText: '贷款 5000 到账', amount: 5000, merchant: '某银行' })

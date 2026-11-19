@@ -24,6 +24,8 @@ export type FeedbackCode =
   | 'MISSING_DIRECTION'
   | 'MISSING_ORIGINAL_TRANSACTION'
   | 'ORIGINAL_NOT_FOUND'
+  | 'REFUND_EXCEEDS_ORIGINAL'
+  | 'PARTIAL_REFUND_AS_INCOME'
   | 'CATEGORY_KIND_MISMATCH'
   | 'LOW_CONFIDENCE_CATEGORY'
   | 'MERCHANT_DEFAULTED'
@@ -171,7 +173,8 @@ function insertNeutral(
     chatAt: string | null;
   },
   extraFeedback: FeedbackItem[],
-  matchedTransactionId: string | null
+  matchedTransactionId: string | null,
+  entryType: 'normal' | 'refund' | 'repayment'
 ): RecordResult {
   const direction = resolved.direction;
   const category = resolved.category;
@@ -207,7 +210,7 @@ function insertNeutral(
       idempotencyKey: record.idempotencyKey,
       createdAt: nowIso,
       updatedAt: nowIso,
-      entryType: kind as 'refund' | 'repayment',
+      entryType,
       matchedTransactionId
     });
 
@@ -254,7 +257,7 @@ function handleSpecialEntry(
   categories: CategoryRow[],
   askedOriginal: boolean
 ): RecordResult {
-  let matched: { id: string; direction: Direction } | null = null;
+  let matched: { id: string; direction: Direction; amountCents: number } | null = null;
   if (record.originalTransactionId !== null) {
     const original = getTransactionById(db, record.originalTransactionId, record.userId);
     if (
@@ -262,13 +265,44 @@ function handleSpecialEntry(
       original.entryType === 'normal' &&
       withinMatchWindow(original.occurredAt, now)
     ) {
-      matched = { id: original.id, direction: original.direction };
+      matched = { id: original.id, direction: original.direction, amountCents: original.amountCents };
     }
   }
 
   if (matched !== null) {
+    const exceeds = resolved.amountCents > matched.amountCents;
+    const partialRefund = kind === 'refund' && resolved.amountCents < matched.amountCents;
+
+    if (partialRefund) {
+      // 部分退款按收入入账（entry_type=normal），与原账单支出相抵。
+      const category =
+        categories.find((item) => item.kind === 'income' && item.name === '其他收入') ??
+        fallbackCategory(categories, 'income');
+      return insertNeutral(
+        db,
+        batch,
+        record,
+        round,
+        kind,
+        { ...resolved, direction: 'income', category },
+        [...timeFeedback, warning('amount', 'PARTIAL_REFUND_AS_INCOME')],
+        matched.id,
+        'normal'
+      );
+    }
+
     // 中性记录方向只由类型决定：退款 = 收入，还款 = 支出。
     const direction: Direction = kind === 'refund' ? 'income' : 'expense';
+    const extra = [...timeFeedback];
+    if (exceeds) {
+      extra.push(warning('amount', 'REFUND_EXCEEDS_ORIGINAL'));
+    }
+    extra.push(
+      warning(
+        'originalTransactionId',
+        kind === 'refund' ? 'REFUND_RECORDED_NEUTRAL' : 'REPAYMENT_RECORDED_NEUTRAL'
+      )
+    );
     return insertNeutral(
       db,
       batch,
@@ -276,14 +310,9 @@ function handleSpecialEntry(
       round,
       kind,
       { ...resolved, direction, category: fallbackCategory(categories, direction) },
-      [
-        ...timeFeedback,
-        warning(
-          'originalTransactionId',
-          kind === 'refund' ? 'REFUND_RECORDED_NEUTRAL' : 'REPAYMENT_RECORDED_NEUTRAL'
-        )
-      ],
-      matched.id
+      extra,
+      matched.id,
+      kind
     );
   }
 
@@ -312,7 +341,8 @@ function handleSpecialEntry(
     kind,
     { ...resolved, direction, category },
     [...timeFeedback, warning('originalTransactionId', 'ORIGINAL_NOT_FOUND_RECORDED')],
-    null
+    null,
+    kind
   );
 }
 

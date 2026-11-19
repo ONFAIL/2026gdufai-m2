@@ -155,6 +155,8 @@
 | `REFUND_RECORDED_NEUTRAL` | 退款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请到账单一览作废原账单」 |
 | `REPAYMENT_RECORDED_NEUTRAL` | 还款已记录为中性，匹配到原账单 | warning | 「已记录，不计入收支；请作废原贷款账单」 |
 | `ORIGINAL_NOT_FOUND_RECORDED` | 未匹配到原账单，已归入「其他/其他收入」 | warning | 「没找到原账单，已记为其他且不计收支」 |
+| `REFUND_EXCEEDS_ORIGINAL` | 退款金额大于原账单 | warning | 「退款金额比原账单还高，请核对退款金额」 |
+| `PARTIAL_REFUND_AS_INCOME` | 退款金额小于原账单，已按收入入账 | warning | 「已按部分退款计入收入」 |
 
 > `MISSING_DIRECTION`：兜底到「其他」视为类别识别成功，**不返回该码**；该码保留但当前不可达，存废由 issue #12 决议。
 >
@@ -466,7 +468,7 @@ POST /api/transactions/tx_xxx/void
 | 11 | 其他收入 | `#9CA3AF` | 利息、分红、基金、股票、理财、收益、报销 |
 | 12 | 贷款 | `#0EA5E9` | 贷款、借款、借到、放款、下款、借钱 |
 
-> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/退货记为中性记录**（`entry_type='refund'`），保留但不计入收支；匹配到原账单时引导作废原单。
+> 口径说明：**转账计入收入**；**贷款计入收入**；**退款/退货**：金额等于原账单记为中性记录（`entry_type='refund'`，不计收支，引导作废原单）；金额小于原账单按**收入**入账（`entry_type='normal'`，类别「其他收入」）；金额大于原账单仍记中性并提示核对。
 
 ---
 
@@ -481,6 +483,7 @@ POST /api/transactions/tx_xxx/void
 - [ ] 同一 `idempotencyKey` 重发 → `duplicate`，账单数不变
 - [ ] 方向与类别冲突 → 首轮 `CATEGORY_KIND_MISMATCH`，第二轮按类别覆盖
 - [x] 文本含「退款」→ 不带 id 首轮 `MISSING_ORIGINAL_TRANSACTION`；带无效 id 首轮 `ORIGINAL_NOT_FOUND`；次轮 → 中性记录 `entry_type='refund'`
+- [x] 退款金额等于原单 → 中性；小于原单 → 收入（`PARTIAL_REFUND_AS_INCOME`）；大于原单 → 中性 + `REFUND_EXCEEDS_ORIGINAL`
 - [ ] 缺 `sentAt` → 整批 `INVALID_BATCH`
 - [ ] 入站 `userId` 与 `DEMO_USER_ID` 不一致 → 整批 `INVALID_BATCH`
 
@@ -500,7 +503,7 @@ POST /api/transactions/tx_xxx/void
    - v1.2：`DUPLICATE_RECORD` 严重度由 `blocking` 改为 `warning`，与 §1.4「按成功处理」一致；
    - v1.2：`FUTURE_TIME` 增加 5 分钟时钟容差，把「未来」的判定边界写死；
    - v1.2：`occurredAt` 要求真实日历日期，拒绝 `2026-02-31` 这类 V8 会静默滚动的输入；
-   - v1.3：退款/还款改为中性记录（`entry_type`），保留但不计入收支；移除 `REFUND_NOT_SUPPORTED`，新增 `ORIGINAL_NOT_FOUND` 等 **5 个**反馈码（`MISSING_ORIGINAL_TRANSACTION`、`ORIGINAL_NOT_FOUND`、`REFUND_RECORDED_NEUTRAL`、`REPAYMENT_RECORDED_NEUTRAL`、`ORIGINAL_NOT_FOUND_RECORDED`）；`summary` 恒只统计 normal，`meta.isEmpty` 依据区间是否有任何记录。
+   - v1.3：退款/还款改为中性记录（`entry_type`），保留但不计入收支；移除 `REFUND_NOT_SUPPORTED`，新增 `ORIGINAL_NOT_FOUND` 等 **7 个**反馈码（`MISSING_ORIGINAL_TRANSACTION`、`ORIGINAL_NOT_FOUND`、`REFUND_RECORDED_NEUTRAL`、`REPAYMENT_RECORDED_NEUTRAL`、`ORIGINAL_NOT_FOUND_RECORDED`、`REFUND_EXCEEDS_ORIGINAL`、`PARTIAL_REFUND_AS_INCOME`）；`summary` 恒只统计 normal，`meta.isEmpty` 依据区间是否有任何记录。
 2. 模块 2 的实现在 `backend/` 下，接口以本文档为准；代码合并后如有差异，以代码为准并同步更新本文档。
 3. 模块 1 / 3 需要新增字段或接口（比如「按商户统计」），先在群里提，确认后由模块 2 加，**不要各自约定后直接改**。
 4. 联调问题优先带三样东西：`batchId` / `recordId` / 接口返回原文，方便直接查 `intake_log`。
