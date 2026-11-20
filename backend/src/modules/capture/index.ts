@@ -25,6 +25,7 @@ export {
   type TextPromptInput
 } from './prompts/extract-text.ts';
 export {
+  ACTIVE_CONTRACT_FEEDBACK_CODES,
   isControlledSourceRef,
   mergeDraftPatch,
   normalizeAmount,
@@ -36,6 +37,7 @@ export {
   parseExtractedReceipt,
   parseJsonPayload,
   validateCaptureDraft,
+  validatePendingFeedbackHints,
   type ParsedReceiptResult
 } from './schema.ts';
 export {

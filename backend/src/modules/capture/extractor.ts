@@ -1,3 +1,4 @@
+import { validatePendingFeedbackHints } from './normalizers.ts';
 import { buildFollowupExtractionPrompts, PROMPT_VERSION_FOLLOWUP } from './prompts/extract-followup.ts';
 import { buildReceiptExtractionPrompts, PROMPT_VERSION_RECEIPT } from './prompts/extract-receipt.ts';
 import { buildTextExtractionPrompts, PROMPT_VERSION_TEXT } from './prompts/extract-text.ts';
@@ -189,6 +190,11 @@ export function createCaptureExtractor(deps: CaptureExtractorDeps): CaptureExtra
             message: error instanceof Error ? error.message : '追问上下文无效。'
           }
         };
+      }
+
+      const feedbackFailure = validatePendingFeedbackHints(input.pendingFeedback);
+      if (feedbackFailure !== null) {
+        return { ok: false, failure: feedbackFailure };
       }
 
       const prompts = buildFollowupExtractionPrompts({

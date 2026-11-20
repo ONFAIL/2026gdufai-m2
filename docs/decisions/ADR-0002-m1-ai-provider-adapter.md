@@ -43,6 +43,6 @@ M1（#6）需要同时承载三类外部 AI 能力：
 
 ## 影响
 
-- **配置与文档**：在 `.env.example` 与 `README.md` 新增 `OCR_API_BASE_URL`、`OCR_MODEL`、`ASR_API_BASE_URL`、`ASR_MODEL`、`AI_TIMEOUT_MS`，并明确 `LLM_*` 与回退规则。
+- **配置与文档**：在 `.env.example` 与 `README.md` 新增 `OCR_API_BASE_URL`、`OCR_MODEL`、`ASR_API_BASE_URL`、`ASR_MODEL`、`AI_TIMEOUT_MS` 及可选快捷回退 `DEEPSEEK_API_KEY`，并明确 `LLM_*` 与回退规则（未设置 `LLM_API_KEY` 时可自动回退读取 `DEEPSEEK_API_KEY` 并默认使用 `https://api.deepseek.com/v1` / `deepseek-chat`）。
 - **M1（#6 / #7）**：抽取服务只产出对齐 `@gduf/capture-flow` 的 `CaptureDraft` / `CaptureDraftPatch`，不修改 M2 入库逻辑或冻结契约；对外 HTTP 上传与抽取端点已另开契约变更议题 [#24](https://github.com/Tarnishedtaffy/2026gdufai/issues/24) 等待 M2 与前端确认后再挂载。
 - **M3**：查账模块如后续复用 LLM 配置，可直接从 `loadConfig().ai.llm` 读取，无需重复解析环境变量。

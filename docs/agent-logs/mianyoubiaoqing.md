@@ -131,3 +131,30 @@
 - **验证**：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend test`（20 文件 100 项，含 M1 新增 5 文件 18 项）、`pnpm --filter frontend test`（2 文件 33 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 全部通过。
 - **人工审核**：方案、交付范围与 GitHub 回复策略已由人确认；本地提交待人复核后再推送与发起 PR。
 - **遗留问题**：本机暂无 `.env` 与真实 AI 密钥，真实第三方模型服务的人工联调验证待配置密钥后补记；`POST /api/capture/uploads` 与 `POST /api/capture/extract` 路由挂载与前端接入待 #24 与 PR #13 推进后跟进；游戏化与异常消费审计待后续开发。
+
+### LOG-mianyoubiaoqing-20261120-01
+
+- **时间**：2026-11-20 13:50（+08:00）
+- **工具/模型**：Antigravity / Orchestrator
+- **模块 / 分支 / PR**：M1 / `feat/m1-capture-extraction` / 待建（关联 [#6](https://github.com/Tarnishedtaffy/2026gdufai/issues/6)、[#24](https://github.com/Tarnishedtaffy/2026gdufai/issues/24)）
+- **任务**：rebase 至包含 #13 与 #17 的最新主干 `9d28ec4`，对齐 `@gduf/capture-flow` 与 #24 校验约束，使用本机环境变量中的真实 `DEEPSEEK_API_KEY` 完成真实 AI + M2 联调测试并提交 PR。
+- **关键提示词**：
+  - 使用环境变量中的 key 进行测试，并提交 PR
+- **代理做了什么**：
+  - 将 `feat/m1-capture-extraction` rebase 到 `upstream/main`（`9d28ec4`），合并解决 `README.md` 与 `backend/src/modules/capture/index.ts` 冲突（保留 `@gduf/capture-flow` 导出与全部鉴权文档），执行 `pnpm install --frozen-lockfile`。
+  - 统一 `backend/src/modules/capture/types.ts` 直接复用 `@gduf/capture-flow` 的 `CaptureDraft`，在 `normalizers.ts` 与 `extractor.ts` 新增 `ACTIVE_CONTRACT_FEEDBACK_CODES` 与 `validatePendingFeedbackHints`：调用 AI 前校验 `pendingFeedback`，拒绝未知或已废弃历史码并返回 `INVALID_CAPTURE_INPUT`。
+  - 在 `backend/src/config/ai.ts` 增加 `DEEPSEEK_API_KEY` 可选回退（未配置 `LLM_API_KEY` 时默认回退为 `https://api.deepseek.com/v1` + `deepseek-chat`），并同步 `.env.example`、`README.md` 与 [ADR-0002](docs/decisions/ADR-0002-m1-ai-provider-adapter.md)。
+  - 补充单元测试与 `@gduf/capture-flow` → `createCaptureExtractor` → 真实 M2 的闭环集成测试；在仓外临时脚本使用环境变量 `DEEPSEEK_API_KEY`（模型 `deepseek-chat`）执行 5 项真实 AI + M2 v1.4 内存 SQLite 联调。
+- **决策**：
+  - 本次仅提交配置、M1 抽取核心、ADR、测试与个人日志，不修改 `docs/contracts/`（待 #23 v1.5 冻结后再按 #24 推进 v1.6 契约与 HTTP 路由挂载）。
+  - 真实 API 联调通过仓外临时脚本执行，仓库内 `backend/test/capture/*.test.ts` 仍保持 100% stub 与零网络依赖，确保 CI 稳定与无密钥泄漏。
+- **验证**：
+  - 真实 `deepseek-chat` + `@gduf/capture-flow` + 真实 M2（v1.4）联调 5 项全部通过（不记录任何密钥内容）：
+    - 单笔中文口语与相对日期（1071ms）：`b_live_2` / `r_live_1` → `confirmed`（`tx_95569e57-3298-4a74-ae1a-d54a6af55dc7`，3250 分，`2026-11-19`）；
+    - 单句多笔拆分（1099ms）：`b_live_5` / `r_live_3`、`r_live_4` → 2 条均 `confirmed`；
+    - 缺金额/时间追问补丁（486ms + 516ms）：首轮 `b_live_7` / `r_live_6` `pending_followup`（`MISSING_AMOUNT`）→ 追问补丁 `{ amount: 18.5, occurredAt: "2026-11-20T12:30:00+08:00" }` 保留商户「学校食堂」→ `b_live_8` `confirmed`（1850 分）；
+    - v1.4 退款表述（845ms）：抽取正数 45 元并保留「退款」原文 → 首轮 `b_live_10` `MISSING_ORIGINAL_TRANSACTION` → 次轮 `b_live_11` `confirmed` 中性记录（`ORIGINAL_NOT_FOUND_RECORDED`）；
+    - 文本端点调用图像 Vision 边界（89ms）：显式返回 `AI_UPSTREAM_ERROR`（HTTP 400），不抛未捕获异常、不伪造草稿。
+  - 全仓静态与单测：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend test`（27 文件 205 项，含 M1 5 文件 20 项）、`pnpm --filter frontend test`（12 文件 73 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 全部通过。
+- **人工审核**：待团队 reviewer 审核本 PR；#24 契约增补待 v1.5 冻结后跟进。
+- **遗留问题**：本机当前仅配置了文本模型密钥 `DEEPSEEK_API_KEY`，多模态 Vision OCR 与 ASR 语音转写端点的真实服务验证待配置支持图像/音频的模型密钥后补记；`POST /api/capture/uploads` 与 `POST /api/capture/extract` 路由挂载与前端附件闭环待 #23/#24 冻结后推进。

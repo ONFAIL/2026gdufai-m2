@@ -9,6 +9,7 @@ import { seedCategories } from '../../src/db/seed/categories.ts';
 import { seedDemoUser } from '../../src/db/seed/users.ts';
 import {
   createCaptureExtractor,
+  createCaptureSession,
   mergeDraftPatch,
   saveCaptureUpload,
   type CaptureAiProvider,
@@ -318,6 +319,91 @@ describe('M1 识别草稿与真实 M2 入库契约联调', () => {
       amount_cents: 2400,
       source_modality: 'voice',
       source_ref: voiceSaved.upload.sourceRef
+    });
+  });
+
+  it('通过 @gduf/capture-flow 的 createCaptureSession 串联 #6 抽取、追问补丁与真实 M2 入库', async () => {
+    const extractor = createCaptureExtractor({
+      uploadDir: './uploads',
+      provider: {
+        completeJson: async (input) => {
+          if (input.userPrompt.includes('followupText')) {
+            return JSON.stringify({ patch: { amount: 22.5 } });
+          }
+          return JSON.stringify({
+            records: [
+              {
+                amount: null,
+                merchant: '第二食堂',
+                occurredAt: null,
+                direction: 'expense',
+                confidence: 0.85,
+                rawText: '食堂买饭'
+              }
+            ]
+          });
+        },
+        completeVisionJson: async () => '',
+        transcribeAudio: async () => ''
+      }
+    });
+
+    const initial = await extractor.extractFromText({
+      rawText: '食堂买饭',
+      referenceTime: SENT_AT
+    });
+    expect(initial.ok).toBe(true);
+    if (!initial.ok) return;
+
+    let seq = 0;
+    const session = createCaptureSession({
+      newId: () => `flow_${++seq}`,
+      importBatch: async (batch) => {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/transactions/import',
+          payload: batch
+        });
+        return res.json();
+      }
+    });
+
+    const draftSnapshot = session.prepare(
+      { sessionId: 's_handoff_1', userId: config.demoUserId, sentAt: SENT_AT, chatAt: SENT_AT },
+      initial.drafts
+    );
+    const recordId = draftSnapshot.records[0]!.record.recordId;
+    const round1 = await session.submit();
+    expect(round1.phase).toBe('pending_followup');
+    const feedback = round1.records[0]!.result!.feedback;
+    expect(feedback).toContainEqual(expect.objectContaining({ code: 'MISSING_AMOUNT' }));
+
+    const patchOutcome = await extractor.extractFollowupPatch({
+      currentDraft: initial.drafts[0]!,
+      followupText: '花了22.5元',
+      pendingFeedback: feedback,
+      referenceTime: SENT_AT
+    });
+    expect(patchOutcome.ok).toBe(true);
+    if (!patchOutcome.ok) return;
+
+    session.update(recordId, patchOutcome.patch);
+    const round2 = await session.submit();
+    expect(round2.phase).toBe('complete');
+    expect(round2.records[0]!.result).toMatchObject({
+      status: 'confirmed',
+      direction: 'expense'
+    });
+    expect(round2.records[0]!.messages.some((m) => m.code === 'TIME_DEFAULTED_TO_CHAT_TIME')).toBe(true);
+
+    const txId = round2.records[0]!.result!.transactionId!;
+    const row = db
+      .prepare('SELECT amount_cents, merchant, time_source FROM transactions WHERE id = ?')
+      .get(txId) as { amount_cents: number; merchant: string; time_source: string };
+    expect(row).toEqual({
+      amount_cents: 2250,
+      merchant: '第二食堂',
+      time_source: 'chat_time'
     });
   });
 });

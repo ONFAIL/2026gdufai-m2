@@ -1,4 +1,26 @@
-import type { CaptureDirection } from './types.ts';
+import type { CaptureDirection, CaptureFailure, PendingFeedbackHint } from './types.ts';
+
+/** 契约 v1.4 §1.5 现行登记的反馈码白名单（不含已废弃的 REFUND_NOT_SUPPORTED 等历史码）。 */
+export const ACTIVE_CONTRACT_FEEDBACK_CODES: ReadonlySet<string> = new Set([
+  'MISSING_AMOUNT',
+  'MISSING_TIME',
+  'FUTURE_TIME',
+  'MISSING_DIRECTION',
+  'CATEGORY_KIND_MISMATCH',
+  'LOW_CONFIDENCE_CATEGORY',
+  'MERCHANT_DEFAULTED',
+  'TIME_DEFAULTED_TO_CHAT_TIME',
+  'DIRECTION_FORCED_BY_CATEGORY',
+  'DUPLICATE_RECORD',
+  'MISSING_ORIGINAL_TRANSACTION',
+  'ORIGINAL_NOT_FOUND',
+  'REFUND_RECORDED_NEUTRAL',
+  'REPAYMENT_RECORDED_NEUTRAL',
+  'ORIGINAL_NOT_FOUND_RECORDED',
+  'ORIGINAL_AMOUNT_ADJUSTED',
+  'REFUND_EXCESS_AS_INCOME',
+  'REPAYMENT_EXCESS_AS_EXPENSE'
+]);
 
 const DIRECTIONS: readonly CaptureDirection[] = ['expense', 'income'];
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -190,4 +212,49 @@ export function normalizeConfidence(value: unknown): number | null {
     throw new Error('confidence 必须是 0 到 1 之间的数字或 null。');
   }
   return value;
+}
+
+/**
+ * 在调用外部 AI 前校验 pendingFeedback；
+ * 未知或已废弃反馈码按 #24 契约决议返回 INVALID_CAPTURE_INPUT。
+ */
+export function validatePendingFeedbackHints(
+  hints: readonly PendingFeedbackHint[] | undefined
+): CaptureFailure | null {
+  if (hints === undefined) {
+    return null;
+  }
+  if (!Array.isArray(hints)) {
+    return {
+      code: 'INVALID_CAPTURE_INPUT',
+      field: 'pendingFeedback',
+      message: 'pendingFeedback 必须是数组。'
+    };
+  }
+  for (let i = 0; i < hints.length; i++) {
+    const hint = hints[i];
+    if (
+      !isPlainObject(hint) ||
+      typeof hint.code !== 'string' ||
+      !ACTIVE_CONTRACT_FEEDBACK_CODES.has(hint.code)
+    ) {
+      return {
+        code: 'INVALID_CAPTURE_INPUT',
+        field: `pendingFeedback[${i}].code`,
+        message: `存在未登记或已废弃的反馈码: ${String(hint?.code ?? '')}`
+      };
+    }
+    if (
+      hint.severity !== undefined &&
+      hint.severity !== 'blocking' &&
+      hint.severity !== 'warning'
+    ) {
+      return {
+        code: 'INVALID_CAPTURE_INPUT',
+        field: `pendingFeedback[${i}].severity`,
+        message: 'pendingFeedback severity 只能是 blocking 或 warning。'
+      };
+    }
+  }
+  return null;
 }

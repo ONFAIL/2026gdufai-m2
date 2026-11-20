@@ -1,4 +1,5 @@
 import {
+  ACTIVE_CONTRACT_FEEDBACK_CODES,
   isControlledSourceRef,
   isPlainObject,
   normalizeAmount,
@@ -7,17 +8,20 @@ import {
   normalizeMerchant,
   normalizeOccurredAt,
   normalizeReferenceTime,
-  parseJsonPayload
+  parseJsonPayload,
+  validatePendingFeedbackHints
 } from './normalizers.ts';
 import type { CaptureDraft, CaptureDraftPatch, CaptureModality } from './types.ts';
 
 export {
+  ACTIVE_CONTRACT_FEEDBACK_CODES,
   isControlledSourceRef,
   normalizeAmount,
   normalizeMerchant,
   normalizeOccurredAt,
   normalizeReferenceTime,
-  parseJsonPayload
+  parseJsonPayload,
+  validatePendingFeedbackHints
 };
 
 const MODALITIES: readonly CaptureModality[] = ['text', 'voice', 'image'];

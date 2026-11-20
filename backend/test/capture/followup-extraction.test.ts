@@ -166,4 +166,44 @@ describe('M1 第二阶段：追问修正与补丁抽取', () => {
     expect(merged.rawText).toContain('某服装店 50 元');
     expect(merged.rawText).toContain('退款');
   });
+
+  it('pendingFeedback 包含未知码或已废弃 REFUND_NOT_SUPPORTED 时在调用 AI 前返回 INVALID_CAPTURE_INPUT', async () => {
+    let aiCalls = 0;
+    const currentDraft: CaptureDraft = {
+      amount: 50,
+      merchant: '某服装店',
+      occurredAt: null,
+      direction: null,
+      confidence: 0.8,
+      rawText: '退货 50',
+      modality: 'text',
+      sourceRef: null
+    };
+
+    const extractor = createCaptureExtractor({
+      uploadDir: './uploads',
+      provider: createStubProvider(async () => {
+        aiCalls++;
+        return JSON.stringify({ patch: {} });
+      })
+    });
+
+    for (const invalidCode of ['REFUND_NOT_SUPPORTED', 'NON_EXISTENT_CODE']) {
+      const outcome = await extractor.extractFollowupPatch({
+        currentDraft,
+        followupText: '补充说明',
+        pendingFeedback: [{ field: 'amount', code: invalidCode, severity: 'blocking' }],
+        referenceTime: REFERENCE_TIME
+      });
+      expect(outcome).toEqual({
+        ok: false,
+        failure: {
+          code: 'INVALID_CAPTURE_INPUT',
+          field: 'pendingFeedback[0].code',
+          message: expect.stringContaining(invalidCode)
+        }
+      });
+    }
+    expect(aiCalls).toBe(0);
+  });
 });

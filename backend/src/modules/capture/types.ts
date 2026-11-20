@@ -1,23 +1,12 @@
+import type { CaptureDraft } from '@gduf/capture-flow';
+
+export type { CaptureDraft };
+
 /** M1 支持的输入形态，与契约 §1.3 保持一致。 */
 export type CaptureModality = 'text' | 'voice' | 'image';
 
 /** M1 抽取允许的收支方向；无法确定时为 null。 */
 export type CaptureDirection = 'expense' | 'income';
-
-/**
- * M1 识别/抽取产出的单条记账草稿，与 `@gduf/capture-flow` 的 `CaptureDraft` 八字段严格对齐。
- * 身份、幂等键与关联原账单 id 均不由模型产出。
- */
-export interface CaptureDraft {
-  readonly amount: number | null;
-  readonly merchant: string | null;
-  readonly occurredAt: string | null;
-  readonly direction: CaptureDirection | null;
-  readonly confidence: number | null;
-  readonly rawText: string;
-  readonly modality: CaptureModality;
-  readonly sourceRef: string | null;
-}
 
 /** 追问补充分片；未提及字段必须保持 undefined，以免覆盖已确认字段。 */
 export type CaptureDraftPatch = Partial<
@@ -40,6 +29,7 @@ export type CaptureFailureCode =
   | 'EMPTY_TRANSCRIPT'
   | 'UNREADABLE_RECEIPT'
   | 'INVALID_SOURCE_REF'
+  | 'INVALID_CAPTURE_INPUT'
   | 'UPLOAD_EMPTY_FILE'
   | 'UPLOAD_TOO_LARGE'
   | 'UPLOAD_UNSUPPORTED_TYPE';

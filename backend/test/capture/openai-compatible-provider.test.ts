@@ -63,6 +63,14 @@ describe('OpenAI 兼容配置与 HTTP 适配器', () => {
     expect(() => loadAiConfig({ LLM_API_BASE_URL: 'ftp://invalid.example.com' })).toThrow();
     expect(() => loadAiConfig({ AI_TIMEOUT_MS: '0' })).toThrow();
     expect(() => loadAiConfig({ AI_TIMEOUT_MS: '1000ms' })).toThrow();
+
+    const deepseekFallback = loadAiConfig({ DEEPSEEK_API_KEY: 'sk-deepseek-stub' });
+    expect(deepseekFallback.llm).toEqual({
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'sk-deepseek-stub',
+      model: 'deepseek-chat'
+    });
+    expect(deepseekFallback.ocr.baseUrl).toBe('https://api.deepseek.com/v1');
   });
 
   it('使用 stub fetch 正确调用文本 JSON、Vision 与 ASR 端点并映射异常', async () => {

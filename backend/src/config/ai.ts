@@ -15,6 +15,8 @@ export interface AiConfig {
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_LLM_MODEL = 'gpt-4o-mini';
+const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
+const DEFAULT_DEEPSEEK_MODEL = 'deepseek-chat';
 const DEFAULT_ASR_MODEL = 'whisper-1';
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -69,13 +71,25 @@ function normalizeModel(value: string | undefined, fallback: string): string {
 
 /**
  * 读取并校验外部 AI 服务端点配置。
+ * 未显式配置 LLM_API_KEY 时支持回退读取 DEEPSEEK_API_KEY（默认 https://api.deepseek.com/v1 + deepseek-chat）；
  * OCR 与 ASR 未单独配置时回退复用 LLM 的地址和密钥。
  */
 export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
+  const explicitLlmKey = normalizeApiKey(env.LLM_API_KEY, null);
+  const deepseekKey = explicitLlmKey === null ? normalizeApiKey(env.DEEPSEEK_API_KEY, null) : null;
+  const usingDeepSeekFallback = deepseekKey !== null;
+
   const llm: AiEndpointConfig = {
-    baseUrl: normalizeBaseUrl(env.LLM_API_BASE_URL, DEFAULT_BASE_URL, 'LLM_API_BASE_URL'),
-    apiKey: normalizeApiKey(env.LLM_API_KEY, null),
-    model: normalizeModel(env.LLM_MODEL, DEFAULT_LLM_MODEL)
+    baseUrl: normalizeBaseUrl(
+      env.LLM_API_BASE_URL,
+      usingDeepSeekFallback ? DEFAULT_DEEPSEEK_BASE_URL : DEFAULT_BASE_URL,
+      'LLM_API_BASE_URL'
+    ),
+    apiKey: explicitLlmKey ?? deepseekKey,
+    model: normalizeModel(
+      env.LLM_MODEL,
+      usingDeepSeekFallback ? DEFAULT_DEEPSEEK_MODEL : DEFAULT_LLM_MODEL
+    )
   };
   const ocr: AiEndpointConfig = {
     baseUrl: normalizeBaseUrl(env.OCR_API_BASE_URL, llm.baseUrl, 'OCR_API_BASE_URL'),
