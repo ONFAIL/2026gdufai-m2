@@ -94,6 +94,13 @@ function normalizeKind(value: unknown): Direction {
   return value;
 }
 
+function normalizeIcon(value: unknown): string {
+  if (typeof value !== 'string') {
+    invalid('icon 必须是字符串', 'icon');
+  }
+  return value;
+}
+
 export interface CreateCategoryInput {
   readonly name?: unknown;
   readonly kind?: unknown;
@@ -107,7 +114,7 @@ export function createCategory(db: Db, input: CreateCategoryInput): CategoryReco
   const name = normalizeName(input.name);
   const kind = normalizeKind(input.kind);
   const color = input.color === undefined ? '#6B7280' : normalizeColor(input.color);
-  const icon = input.icon === undefined ? '' : String(input.icon);
+  const icon = input.icon === undefined ? '' : normalizeIcon(input.icon);
   const keywords = input.keywords === undefined ? [] : normalizeKeywords(input.keywords);
   const sortOrder =
     input.sortOrder === undefined
@@ -145,10 +152,22 @@ export function updateCategory(db: Db, id: number, input: UpdateCategoryInput): 
   if (input.kind !== undefined) {
     invalid('kind 创建后不可变', 'kind');
   }
+  if (
+    current.isPreset &&
+    (input.name !== undefined ||
+      input.color !== undefined ||
+      input.icon !== undefined ||
+      input.keywords !== undefined ||
+      input.sortOrder !== undefined)
+  ) {
+    throw new AppError('CATEGORY_PRESET_PROTECTED', 403, '预设类别只能停用，不能修改其他字段', {
+      field: 'categoryId'
+    });
+  }
 
   const name = input.name === undefined ? current.name : normalizeName(input.name);
   const color = input.color === undefined ? current.color : normalizeColor(input.color);
-  const icon = input.icon === undefined ? current.icon : String(input.icon);
+  const icon = input.icon === undefined ? current.icon : normalizeIcon(input.icon);
   const keywords = input.keywords === undefined ? current.keywords : normalizeKeywords(input.keywords);
   const sortOrder =
     input.sortOrder === undefined
