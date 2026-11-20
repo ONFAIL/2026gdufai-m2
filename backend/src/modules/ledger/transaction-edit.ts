@@ -13,6 +13,7 @@ interface EditRow {
   occurred_at: string;
   category_id: number | null;
   status: string;
+  entry_type: string;
 }
 
 function invalid(message: string, field: string): never {
@@ -26,7 +27,7 @@ function transactionNotFound(id: string): AppError {
 function findTransaction(db: Db, id: string, userId: string): EditRow | null {
   const row = db
     .prepare(
-      `SELECT id, direction, amount_cents, merchant, occurred_at, category_id, status
+      `SELECT id, direction, amount_cents, merchant, occurred_at, category_id, status, entry_type
          FROM transactions WHERE id = ? AND user_id = ?`
     )
     .get(id, userId) as EditRow | undefined;
@@ -90,6 +91,9 @@ export function patchTransaction(
   if (current.status !== 'confirmed') {
     invalid('已作废的账单不可修改', 'status');
   }
+  if (current.entry_type !== 'normal') {
+    invalid('中性记录不允许直接修改', 'entryType');
+  }
 
   let categoryId = current.category_id;
   let direction: 'expense' | 'income' = current.direction;
@@ -116,7 +120,7 @@ export function patchTransaction(
   }
 
   if (input.amountCents !== undefined) {
-    if (!Number.isInteger(input.amountCents) || (input.amountCents as number) <= 0) {
+    if (!Number.isSafeInteger(input.amountCents) || (input.amountCents as number) <= 0) {
       invalid('amountCents 必须是正整数', 'amountCents');
     }
     amountCents = input.amountCents as number;
@@ -141,24 +145,31 @@ export function patchTransaction(
 
   const now = nowIsoShanghai();
   db.transaction(() => {
+    const assignments: string[] = [];
+    const values: Array<string | number | null> = [];
+
+    if (input.categoryId !== undefined) {
+      assignments.push('category_id = ?', 'direction = ?', "direction_source = 'category'", "category_source = 'manual'");
+      values.push(categoryId, direction);
+    }
+    if (input.amountCents !== undefined) {
+      assignments.push('amount_cents = ?');
+      values.push(amountCents);
+    }
+    if (input.merchant !== undefined) {
+      assignments.push('merchant = ?');
+      values.push(merchant);
+    }
+    if (input.occurredAt !== undefined) {
+      assignments.push('occurred_at = ?', 'occurred_date = ?', "time_source = 'explicit'", 'chat_at = NULL');
+      values.push(occurredAt, toShanghaiDate(occurredAt));
+    }
+    assignments.push('updated_at = ?');
+    values.push(now, id, userId);
+
     db.prepare(
-      `UPDATE transactions
-          SET category_id = ?, direction = ?, direction_source = ?,
-              amount_cents = ?, merchant = ?, occurred_at = ?, occurred_date = ?,
-              time_source = 'explicit', chat_at = NULL, updated_at = ?
-        WHERE id = ? AND user_id = ?`
-    ).run(
-      categoryId,
-      direction,
-      changedCategory ? 'category' : 'explicit',
-      amountCents,
-      merchant,
-      occurredAt,
-      toShanghaiDate(occurredAt),
-      now,
-      id,
-      userId
-    );
+      `UPDATE transactions SET ${assignments.join(', ')} WHERE id = ? AND user_id = ?`
+    ).run(...values);
 
     if (changedCategory && categoryId !== null && merchant !== null && merchant.trim() !== '') {
       db.prepare(
@@ -218,6 +229,9 @@ export function voidTransactionById(db: Db, id: string, userId: string): { id: s
     throw transactionNotFound(id);
   }
   if (current.status !== 'void') {
+    if (current.entry_type !== 'normal') {
+      invalid('中性记录不允许直接作废', 'entryType');
+    }
     db.prepare(
       "UPDATE transactions SET status = 'void', updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(nowIsoShanghai(), id, userId);
