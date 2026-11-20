@@ -158,3 +158,28 @@
   - 全仓静态与单测：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend test`（27 文件 205 项，含 M1 5 文件 20 项）、`pnpm --filter frontend test`（12 文件 73 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 全部通过。
 - **人工审核**：待团队 reviewer 审核本 PR；#24 契约增补待 v1.5 冻结后跟进。
 - **遗留问题**：本机当前仅配置了文本模型密钥 `DEEPSEEK_API_KEY`，多模态 Vision OCR 与 ASR 语音转写端点的真实服务验证待配置支持图像/音频的模型密钥后补记；`POST /api/capture/uploads` 与 `POST /api/capture/extract` 路由挂载与前端附件闭环待 #23/#24 冻结后推进。
+
+### LOG-mianyoubiaoqing-20261120-02
+
+- **时间**：2026-11-20 14:04（+08:00）
+- **工具/模型**：Antigravity / Orchestrator
+- **模块 / 分支 / PR**：M1 / `feat/m1-capture-extraction` / [#30](https://github.com/Tarnishedtaffy/2026gdufai/pull/30)
+- **任务**：依据 DeepSeek 官方 API 文档与实时模型列表接入 `deepseek-flash`、`/v1/tools/ocr` 与 `/v1/tools/asr`，完成文字、小票图片 OCR 与语音 ASR 三模态真实联调并更新 PR #30。
+- **关键提示词**：
+  - deepseek 的 api 有提供 ocr、asr 等服务，查阅相关文档，应该也可以使用
+- **代理做了什么**：
+  - 核对 DeepSeek 官方文档与 `GET /v1/models` 实时响应：确认当前多模态主模型 ID 为 `deepseek-flash`，并分别提供独立文档/图片 OCR 端点 `POST /v1/tools/ocr`（`purpose="text_recognition"` + `file` → `pages[].text`）与语音转写端点 `POST /v1/tools/asr`（`file`，支持 16-bit PCM WAV / Ogg Opus，≤ 8 MiB / 120s → `{ request_id, text, duration_ms }`）。
+  - 更新 `backend/src/config/ai.ts` 与 `backend/src/config/index.ts`：DeepSeek 默认模型调整为 `deepseek-flash`，新增 `OcrProtocol`（`openai-vision` / `deepseek-ocr`）与 `AsrProtocol`（`openai-asr` / `deepseek-asr`），按服务商域名自动判别并支持 `OCR_PROTOCOL` / `ASR_PROTOCOL` 显式覆盖；同步更新 `.env.example`、`README.md` 与 [ADR-0002](docs/decisions/ADR-0002-m1-ai-provider-adapter.md)。
+  - 新增 `backend/src/modules/capture/deepseek-tools.ts` 并在 `provider.ts` 接入双协议分派：`deepseek-ocr` 先识别票面文字（空白则直接判不可读，不再调用 LLM）再由 `deepseek-flash` 结构化为 `CaptureDraft`；`deepseek-asr` 直接调用 `/v1/tools/asr` 转写语音后进入统一文字抽取链。
+  - 在 `backend/test/capture/openai-compatible-provider.test.ts` 新增 `deepseek-ocr` / `deepseek-asr` 配置与 stub `fetch` 测试；在仓外临时脚本使用 `DEEPSEEK_API_KEY` 完成全 3 模态 8 项真实联调。
+- **决策**：
+  - 保留 `openai-vision` 与 `openai-asr` 兼容分支，仅在 DeepSeek 域名下默认切换至 `/v1/tools/ocr` 与 `/v1/tools/asr`，确保阿里百炼、硅基流动、OpenAI 等服务商仍可直接沿用既有配置。
+  - 空白小票 OCR 结果或 `deepseek-flash` 判定的无关字符噪点均通过 `UNREADABLE_RECEIPT` 结构化失败返回，不伪造草稿。
+- **验证**：
+  - 真实 `DEEPSEEK_API_KEY` 全模态端到端联调 8 项全部通过（含 `@gduf/capture-flow` 与真实 M2 v1.4 SQLite 落库）：
+    - 文字 4 项（`deepseek-flash`）：单笔中文口语（1257ms → `confirmed`）、单句多笔拆分（2054ms → 2 条 `confirmed`）、缺金额追问补丁（1823ms + 1051ms → `confirmed` 保留商户）、v1.4 退款文本（1330ms → `MISSING_ORIGINAL_TRANSACTION` → `ORIGINAL_NOT_FOUND_RECORDED`）；
+    - 小票图片 OCR 2 项（`/v1/tools/ocr` + `deepseek-flash`）：多金额 PNG 小票（`SUBTOTAL 58.00 / DISCOUNT -8.00 / PAID 50.00 RMB`，3799ms）准确抽取实付 `50` 元与受控 `sourceRef`，写入 SQLite `amount_cents=5000, source_modality='image'`；纯白空白 PNG（9077ms）判定 `UNREADABLE_RECEIPT` 不伪造草稿；
+    - 语音 ASR 2 项（`/v1/tools/asr` + `deepseek-flash`）：合成中文语音 WAV（`昨天下午打车去高铁站花了三十八块五`，2271ms）准确转写并抽取 `38.5` 元与受控 `sourceRef`，写入 SQLite `amount_cents=3850, source_modality='voice'`；1 秒静音 PCM WAV（171ms）返回 `EMPTY_TRANSCRIPT`。
+  - 全仓静态与单测：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend test`（27 文件 206 项）、`pnpm --filter frontend test`（12 文件 73 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 全部通过。
+- **人工审核**：PR [#30](https://github.com/Tarnishedtaffy/2026gdufai/pull/30) 已更新并提交，待 reviewer 审核。
+- **遗留问题**：`POST /api/capture/uploads` 与 `POST /api/capture/extract` 路由挂载及前端附件闭环待 #23（v1.5）冻结后按 #24 写入 v1.6 契约推进。

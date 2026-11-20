@@ -1,7 +1,23 @@
 import { resolve } from 'node:path';
-import { loadAiConfig, type AiConfig, type AiEndpointConfig } from './ai.ts';
+import {
+  loadAiConfig,
+  type AiConfig,
+  type AiEndpointConfig,
+  type AsrEndpointConfig,
+  type AsrProtocol,
+  type OcrEndpointConfig,
+  type OcrProtocol
+} from './ai.ts';
 
-export { loadAiConfig, type AiConfig, type AiEndpointConfig };
+export {
+  loadAiConfig,
+  type AiConfig,
+  type AiEndpointConfig,
+  type AsrEndpointConfig,
+  type AsrProtocol,
+  type OcrEndpointConfig,
+  type OcrProtocol
+};
 
 /** 应用配置。业务代码只从这里取配置，不直接读 process.env。 */
 export interface AppConfig {

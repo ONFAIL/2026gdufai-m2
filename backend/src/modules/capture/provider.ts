@@ -1,4 +1,5 @@
 import type { AiConfig, AiEndpointConfig } from '../../config/ai.ts';
+import { callDeepSeekAsr, callDeepSeekOcr } from './deepseek-tools.ts';
 import {
   CaptureProviderError,
   type AudioTranscriptionInput,
@@ -87,38 +88,47 @@ async function parseJsonResponse(response: Response, label: string): Promise<unk
 }
 
 /**
- * 基于 Node 22 原生 fetch 实现 OpenAI 兼容协议适配器，见 ADR-0002。
- * 支持 Chat Completions（文字/追问）、Vision（小票图片）与 /audio/transcriptions（语音）。
+ * 基于 Node 22 原生 fetch 实现多服务商 AI 适配器，见 ADR-0002。
+ * 支持 OpenAI 兼容端点（Chat Completions / Vision / /audio/transcriptions）与 DeepSeek /v1/tools/ocr、/v1/tools/asr。
  */
 export function createOpenAiCompatibleProvider(
   config: AiConfig,
   fetchFn: typeof fetch = globalThis.fetch
 ): CaptureAiProvider {
+  async function requestJson(
+    endpoint: AiEndpointConfig,
+    path: string,
+    label: string,
+    initBuilder: (apiKey: string) => RequestInit
+  ): Promise<unknown> {
+    const apiKey = requireApiKey(endpoint, label);
+    const response = await fetchWithTimeout(
+      fetchFn,
+      `${endpoint.baseUrl}${path}`,
+      initBuilder(apiKey),
+      config.timeoutMs
+    );
+    return parseJsonResponse(response, label);
+  }
+
   async function callChatCompletions(
     endpoint: AiEndpointConfig,
     label: string,
     messages: readonly Record<string, unknown>[]
   ): Promise<string> {
-    const apiKey = requireApiKey(endpoint, label);
-    const response = await fetchWithTimeout(
-      fetchFn,
-      `${endpoint.baseUrl}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: endpoint.model,
-          temperature: 0,
-          response_format: { type: 'json_object' },
-          messages
-        })
+    const payload = await requestJson(endpoint, '/chat/completions', label, (apiKey) => ({
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`
       },
-      config.timeoutMs
-    );
-    const payload = await parseJsonResponse(response, label);
+      body: JSON.stringify({
+        model: endpoint.model,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages
+      })
+    }));
     return extractChoiceContent(payload);
   }
 
@@ -131,6 +141,23 @@ export function createOpenAiCompatibleProvider(
     },
 
     async completeVisionJson(input: VisionCompletionInput): Promise<string> {
+      if (config.ocr.protocol === 'deepseek-ocr') {
+        const ocrText = await callDeepSeekOcr(requestJson, config.ocr, input);
+        if (ocrText === '') {
+          return JSON.stringify({
+            readable: false,
+            reason: '小票图像模糊或未识别出有效文字，请重新拍摄清晰小票或改用文字输入。',
+            ocrText: null,
+            records: []
+          });
+        }
+        const structEndpoint = config.llm.apiKey !== null ? config.llm : config.ocr;
+        return callChatCompletions(structEndpoint, 'OCR 结构化抽取', [
+          { role: 'system', content: input.systemPrompt },
+          { role: 'user', content: `${input.userPrompt}\n\nOCR 识别原文：\n${ocrText}` }
+        ]);
+      }
+
       // Base64 仅用于服务端出站多模态请求，绝不写入 sourceRef 或日志。
       const dataUrl = `data:${input.mimeType};base64,${Buffer.from(input.imageBytes).toString('base64')}`;
       return callChatCompletions(config.ocr, 'OCR 小票识别', [
@@ -146,6 +173,10 @@ export function createOpenAiCompatibleProvider(
     },
 
     async transcribeAudio(input: AudioTranscriptionInput): Promise<string> {
+      if (config.asr.protocol === 'deepseek-asr') {
+        return callDeepSeekAsr(requestJson, config.asr, input);
+      }
+
       const apiKey = requireApiKey(config.asr, 'ASR 语音转写');
       const form = new FormData();
       const audioBlob = new Blob([new Uint8Array(input.audioBytes)], { type: input.mimeType });
@@ -157,9 +188,7 @@ export function createOpenAiCompatibleProvider(
         `${config.asr.baseUrl}/audio/transcriptions`,
         {
           method: 'POST',
-          headers: {
-            authorization: `Bearer ${apiKey}`
-          },
+          headers: { authorization: `Bearer ${apiKey}` },
           body: form
         },
         config.timeoutMs

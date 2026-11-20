@@ -31,18 +31,18 @@ M1（#6）需要同时承载三类外部 AI 能力：
 1. 在 `backend/src/modules/capture/types.ts` 定义 `CaptureAiProvider` 抽象接口（`completeJson`、`completeVisionJson`、`transcribeAudio`），与抽取逻辑解耦；
 2. 默认实现 `createOpenAiCompatibleProvider` 使用 Node 22 原生 `fetch`：
    - 文本与追问抽取：`POST {LLM_API_BASE_URL}/chat/completions`（`response_format: { type: 'json_object' }`，`temperature: 0`）；
-   - 小票图像识别：`POST {OCR_API_BASE_URL}/chat/completions`（Vision `image_url` base64 data URL 仅在服务端出站报文中使用，不写入 `sourceRef` 或日志）；
-   - 语音转写：`POST {ASR_API_BASE_URL}/audio/transcriptions`（`multipart/form-data` 上传受控落盘音频）；
-3. `OCR_*` 与 `ASR_*` 的地址/密钥未单独设置时默认回退复用 `LLM_API_BASE_URL` / `LLM_API_KEY`，避免配置繁琐，同时允许将 OCR/ASR 切换到独立模型或端点。
+   - 小票图像识别：支持双协议切换——`openai-vision` 走 `POST {OCR_API_BASE_URL}/chat/completions`（Vision `image_url` base64 data URL 仅在服务端出站报文中使用，不写入 `sourceRef` 或日志）；`deepseek-ocr`（DeepSeek 域名默认）走 `POST {OCR_API_BASE_URL}/tools/ocr`（`multipart/form-data`，`purpose="text_recognition"`）提取票面文字后再交由 `LLM` 结构化抽取为标准草稿；
+   - 语音转写：支持双协议切换——`openai-asr` 走 `POST {ASR_API_BASE_URL}/audio/transcriptions`；`deepseek-asr`（DeepSeek 域名默认）走 `POST {ASR_API_BASE_URL}/tools/asr`（`multipart/form-data`，上传受控落盘音频，支持 16-bit PCM WAV / Ogg Opus，≤ 8 MiB / 120s）；
+3. `OCR_*` 与 `ASR_*` 的地址/密钥未单独设置时默认回退复用 `LLM_API_BASE_URL` / `LLM_API_KEY`，避免配置繁琐，同时允许按 `OCR_PROTOCOL` / `ASR_PROTOCOL` 将 OCR/ASR 切换到独立模型或端点。
 
 ## 理由
 
-- 阿里百炼（Qwen / Qwen-VL / SenseVoice 兼容接口）、硅基流动（DeepSeek / Qwen2.5-VL / SenseVoiceSmall）、OpenAI 等主流平台均直接支持 `/chat/completions` 与 `/audio/transcriptions` 标准路径，能一次满足评审环境切换需求；
+- 阿里百炼（Qwen / Qwen-VL / SenseVoice 兼容接口）、硅基流动（DeepSeek / Qwen2.5-VL / SenseVoiceSmall）、OpenAI 与 DeepSeek 官方 API（`deepseek-flash` + `/v1/tools/ocr` + `/v1/tools/asr`）均可在同一适配层内配置切换，无需引入第三方厂商独占 SDK；
 - 不新增 npm 依赖，不改动 `pnpm-lock.yaml` 与 Docker 构建缓存结构；
-- `CaptureAiProvider` 抽象保证日后若需接入非兼容协议的专有 ASR/OCR 服务，只需新增一个实现文件，不影响提示词、schema 校验与下游 `CaptureDraft` 交接。
+- `CaptureAiProvider` 抽象保证日后若需接入其他专有 ASR/OCR 服务，只需扩展协议分派或新增实现文件，不影响提示词、schema 校验与下游 `CaptureDraft` 交接。
 
 ## 影响
 
-- **配置与文档**：在 `.env.example` 与 `README.md` 新增 `OCR_API_BASE_URL`、`OCR_MODEL`、`ASR_API_BASE_URL`、`ASR_MODEL`、`AI_TIMEOUT_MS` 及可选快捷回退 `DEEPSEEK_API_KEY`，并明确 `LLM_*` 与回退规则（未设置 `LLM_API_KEY` 时可自动回退读取 `DEEPSEEK_API_KEY` 并默认使用 `https://api.deepseek.com/v1` / `deepseek-chat`）。
+- **配置与文档**：在 `.env.example` 与 `README.md` 新增 `OCR_API_BASE_URL`、`OCR_MODEL`、`OCR_PROTOCOL`、`ASR_API_BASE_URL`、`ASR_MODEL`、`ASR_PROTOCOL`、`AI_TIMEOUT_MS` 及可选快捷回退 `DEEPSEEK_API_KEY`，并明确 `LLM_*` 与回退规则（未设置 `LLM_API_KEY` 时可自动回退读取 `DEEPSEEK_API_KEY` 并默认使用 `https://api.deepseek.com/v1` / `deepseek-flash`）。
 - **M1（#6 / #7）**：抽取服务只产出对齐 `@gduf/capture-flow` 的 `CaptureDraft` / `CaptureDraftPatch`，不修改 M2 入库逻辑或冻结契约；对外 HTTP 上传与抽取端点已另开契约变更议题 [#24](https://github.com/Tarnishedtaffy/2026gdufai/issues/24) 等待 M2 与前端确认后再挂载。
 - **M3**：查账模块如后续复用 LLM 配置，可直接从 `loadConfig().ai.llm` 读取，无需重复解析环境变量。
