@@ -522,3 +522,20 @@
 - **验证**：`pnpm -r typecheck` / `lint` / `test` / `build` 全绿（frontend 73 例、backend 187 例）
 - **人工审核**：待 CI 重跑
 - **遗留问题**：前端类别 13 / mock / `settledAt` 等仍在 #18
+### LOG-Z_Wen-20261120-02
+
+- **时间**：2026-11-20 14:00（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-loan-interest-a` / #27
+- **任务**：按 #24 代码级 Review 补齐 PR-A
+- **关键提示词**：reviewer 要求迁移补 CHECK/索引、类别 13 颜色与 seed 一致、前端类别 13 同步、开上游 PR
+- **代理做了什么**：
+  - 迁移 003 增加 `principal_cents CHECK`、`idx_tx_matched_entry` 索引；
+  - 类别 13 颜色统一为 `#14B8A6`（seed、契约、前端 mock）；
+  - 前端 `verify2` 色值数组与类别数量改为 13；
+  - 契约 §2.2 补 `netCents` 口径说明；
+  - 已 rebase 到 main `76bcf40`，并修复 v1.5 反馈码前端测试
+- **决策**：沿用现有迁移实现（defer_foreign_keys + 改 id），只补约束与索引，不改成复制行方案
+- **验证**：`pnpm -r typecheck / lint / test / build` 全绿（frontend 73 例、backend 187 例）
+- **人工审核**：待开 PR 并重跑 CI
+- **遗留问题**：PR-B / PR-C 未做
