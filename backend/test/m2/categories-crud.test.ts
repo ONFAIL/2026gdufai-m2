@@ -81,6 +81,30 @@ describe('类别 CRUD', () => {
     expect(changedKind.body).toMatchObject({ error: { code: 'INVALID_QUERY_PARAM', field: 'kind' } });
   });
 
+  it('PATCH 预设类别只允许停用，改其他字段返回 403', async () => {
+    const rename = await request('PATCH', '/api/categories/1', { name: '餐饮改名' });
+    expect(rename.status).toBe(403);
+    expect(rename.body).toMatchObject({ error: { code: 'CATEGORY_PRESET_PROTECTED' } });
+
+    const color = await request('PATCH', '/api/categories/1', { color: '#000000' });
+    expect(color.status).toBe(403);
+
+    const disable = await request('PATCH', '/api/categories/1', { isActive: false });
+    expect(disable.status).toBe(200);
+    expect(disable.body).toMatchObject({ isActive: false });
+
+    const enable = await request('PATCH', '/api/categories/1', { isActive: true });
+    expect(enable.status).toBe(200);
+  });
+
+  it('icon 传对象返回 422', async () => {
+    const created = await createCategory('图标测试');
+    const id = (created.body as { id: number }).id;
+    const result = await request('PATCH', `/api/categories/${id}`, { icon: { a: 1 } });
+    expect(result.status).toBe(422);
+    expect(result.body).toMatchObject({ error: { code: 'INVALID_QUERY_PARAM', field: 'icon' } });
+  });
+
   it('删除预设类别返回 403', async () => {
     const result = await request('DELETE', '/api/categories/1');
     expect(result.status).toBe(403);
