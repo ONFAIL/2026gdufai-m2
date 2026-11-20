@@ -2,7 +2,11 @@
 -- 1) transactions 增加 settled_at（原贷款结清时间，可空）
 -- 2) 若 13 已被自定义类别占用，先整体迁移到 MAX(id)+1，再插入预设 13
 ALTER TABLE transactions ADD COLUMN settled_at TEXT;
-ALTER TABLE transactions ADD COLUMN principal_cents INTEGER;
+ALTER TABLE transactions ADD COLUMN principal_cents INTEGER
+  CHECK (principal_cents IS NULL OR principal_cents >= 0);
+
+CREATE INDEX idx_tx_matched_entry
+  ON transactions (matched_transaction_id, entry_type, status);
 
 PRAGMA defer_foreign_keys = ON;
 
@@ -39,6 +43,6 @@ INSERT OR IGNORE INTO categories
 VALUES
   (13, '贷款利息', 'expense',
    '["贷款利息","借款利息","房贷利息","还款利息","利息支出","分期利息"]',
-   '#6366F1', '🧾', 13, 1, 1, '2026-11-19T00:00:00+08:00');
+   '#14B8A6', '🧾', 13, 1, 1, '2026-11-19T00:00:00+08:00');
 
 DROP TABLE _preset13_migration;
