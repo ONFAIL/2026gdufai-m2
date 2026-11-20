@@ -108,3 +108,26 @@
 - **验证**：首轮 CI 的源码检查 54 秒、Docker job 63 秒通过；日志包含 `node: v22.23.5`、重建后 `Healthy` 和 `Container smoke passed: frontend, API 404, SQLite, non-root user, repaired persistent volumes.`。Action 元数据已核对均使用 node24、现有输入仍受支持；本地 actionlint 与 diff 检查在提交前执行，升级后的远端结果将在 PR 验证区更新。
 - **人工审核**：用户已授权重跑与修复；PR 仍待 reviewer 复核。
 - **遗留问题**：Action 升级需新提交 CI 再验证；GHCR 的实际推送仍需合入 main 后验证。
+
+### LOG-mianyoubiaoqing-20261119-01
+
+- **时间**：2026-11-19 22:56（+08:00）
+- **工具/模型**：Antigravity / Orchestrator
+- **模块 / 分支 / PR**：M1 / `feat/m1-capture-extraction` / 待建（关联 [#6](https://github.com/Tarnishedtaffy/2026gdufai/issues/6)、[#21](https://github.com/Tarnishedtaffy/2026gdufai/issues/21)、[#24](https://github.com/Tarnishedtaffy/2026gdufai/issues/24)、PR [#13](https://github.com/Tarnishedtaffy/2026gdufai/pull/13)）
+- **任务**：同步上游最新提交，review 契约 v1.4（#21）与 PR #13 交接，并完成 M1 #6 多模态识别与字段抽取核心。
+- **关键提示词**：
+  - 拉取仓库远端最新提交，review #21 号 issue，再完成 M1 模块本人部分（#6）
+  - 人确认：在 #21 评论确认 M1 知悉（不代勾含 M3 的复选框）、在 PR #13 评论确认交接；一次完成 #6 后端核心并另提 contract-change issue；采用 OpenAI 兼容协议统一适配；本地提交暂不推送
+- **代理做了什么**：
+  - 同步本地 `main` 至 `upstream/main`（`e7180fe`）并切出功能分支 `feat/m1-capture-extraction`。
+  - 在 [#21](https://github.com/Tarnishedtaffy/2026gdufai/issues/21#issuecomment-7012527951) 评论确认 M1 识别端知悉契约 v1.4；在 PR [#13](https://github.com/Tarnishedtaffy/2026gdufai/pull/13#issuecomment-7012529049) 评论确认 `CaptureDraft` / `Partial<CaptureDraft>` 交接口径与文件防冲突边界；创建契约变更议题 [#24](https://github.com/Tarnishedtaffy/2026gdufai/issues/24) 提议新增 `POST /api/capture/uploads` 与 `POST /api/capture/extract` 及对应 §2.6 错误码。
+  - 新增 `backend/src/config/ai.ts` 并在 `backend/src/config/index.ts`、`.env.example`、`README.md` 同步新增 AI 环境变量说明；新增 [ADR-0002](docs/decisions/ADR-0002-m1-ai-provider-adapter.md)。
+  - 新增 M1 多模态识别与抽取核心：`backend/src/modules/capture/{types,normalizers,schema,storage,provider,extractor,index}.ts` 与版本化提示词 `prompts/{extract-text,extract-followup,extract-receipt}.ts`。
+  - 新增 5 组 stub 单元与真实 M2 联调测试：`backend/test/capture/{text-extraction,followup-extraction,multimodal-pipeline,openai-compatible-provider,m1-m2-handoff}.test.ts`（18 例）。
+- **决策**：
+  - 统一采用基于 Node 22 原生 `fetch` / `FormData` / `Blob` 的 OpenAI 兼容协议适配器，支持 `OCR_*` / `ASR_*` 未配置时自动回退至 `LLM_*`，不引入厂商专有依赖，不改动 `pnpm-lock.yaml`。
+  - 提示词初始版本分别为 `m1-text-v1`、`m1-followup-v1`、`m1-receipt-v1`（首次建立，无旧版本对比）；严格剥离模型夹带的身份、幂等键与 `originalTransactionId`，将 `0` 与「未知」等占位词规整为 `null`，并将日期/时间统一规范化为合法 `+08:00` 日历时间。
+  - 不修改 `backend/src/modules/ledger/`、`docs/contracts/` 或 PR #13 的 `capture/README.md`；对外上传/抽取路由待 #24 经契约组与前端确认后再挂载。
+- **验证**：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend test`（20 文件 100 项，含 M1 新增 5 文件 18 项）、`pnpm --filter frontend test`（2 文件 33 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 全部通过。
+- **人工审核**：方案、交付范围与 GitHub 回复策略已由人确认；本地提交待人复核后再推送与发起 PR。
+- **遗留问题**：本机暂无 `.env` 与真实 AI 密钥，真实第三方模型服务的人工联调验证待配置密钥后补记；`POST /api/capture/uploads` 与 `POST /api/capture/extract` 路由挂载与前端接入待 #24 与 PR #13 推进后跟进；游戏化与异常消费审计待后续开发。
