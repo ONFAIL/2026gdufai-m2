@@ -14,14 +14,66 @@ export type EndpointJsonRequester = (
 ) => Promise<unknown>;
 
 const DEEPSEEK_ASR_MAX_BYTES = 8 * 1024 * 1024;
+const DEEPSEEK_ASR_MAX_DURATION_SECONDS = 120;
 const DEEPSEEK_ASR_MIMES = new Set(['audio/wav', 'audio/x-wav', 'audio/ogg']);
 
-const MIME_TO_IMAGE_EXT: Readonly<Record<string, string>> = {
-  'image/jpeg': 'jpg',
-  'image/jpg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp'
-};
+const MIME_TO_IMAGE_EXT: ReadonlyMap<string, string> = new Map([
+  ['image/jpeg', 'jpg'],
+  ['image/jpg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/webp', 'webp']
+]);
+
+function readAsciiFourCC(bytes: Uint8Array, offset: number): string {
+  return String.fromCharCode(
+    bytes[offset] ?? 0,
+    bytes[offset + 1] ?? 0,
+    bytes[offset + 2] ?? 0,
+    bytes[offset + 3] ?? 0
+  );
+}
+
+/** 解析标准 RIFF/WAVE 头并计算音频时长（秒）；非完整 WAV 容器时返回 null。 */
+function estimateWavDurationSeconds(bytes: Uint8Array): number | null {
+  if (bytes.byteLength < 12) {
+    return null;
+  }
+  if (readAsciiFourCC(bytes, 0) !== 'RIFF' || readAsciiFourCC(bytes, 8) !== 'WAVE') {
+    return null;
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 12;
+  let byteRate: number | null = null;
+  let dataBytes: number | null = null;
+
+  while (offset + 8 <= bytes.byteLength) {
+    const chunkId = readAsciiFourCC(bytes, offset);
+    const chunkSize = view.getUint32(offset + 4, true);
+    const dataStart = offset + 8;
+
+    if (chunkId === 'fmt ' && chunkSize >= 16 && dataStart + 16 <= bytes.byteLength) {
+      const rate = view.getUint32(dataStart + 8, true);
+      if (rate > 0) {
+        byteRate = rate;
+      }
+    } else if (chunkId === 'data') {
+      dataBytes = Math.min(chunkSize, Math.max(0, bytes.byteLength - dataStart));
+    }
+
+    if (byteRate !== null && dataBytes !== null) {
+      return dataBytes / byteRate;
+    }
+
+    const paddedSize = chunkSize + (chunkSize % 2);
+    if (paddedSize > bytes.byteLength - dataStart) {
+      break;
+    }
+    offset = dataStart + paddedSize;
+  }
+
+  return null;
+}
 
 /**
  * 调用 DeepSeek 专用 OCR 工具端点（POST /v1/tools/ocr）。
@@ -32,7 +84,8 @@ export async function callDeepSeekOcr(
   endpoint: OcrEndpointConfig,
   input: VisionCompletionInput
 ): Promise<string> {
-  const ext = MIME_TO_IMAGE_EXT[input.mimeType.toLowerCase()] ?? 'png';
+  const normalizedMime = input.mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
+  const ext = MIME_TO_IMAGE_EXT.get(normalizedMime) ?? 'png';
   const form = new FormData();
   form.append('purpose', 'text_recognition');
   form.append(
@@ -65,7 +118,8 @@ export async function callDeepSeekOcr(
 
 /**
  * 调用 DeepSeek 专用语音转写工具端点（POST /v1/tools/asr）。
- * 按官方文档上传 16-bit PCM WAV 或 Ogg Opus 音频并返回识别文本。
+ * 按官方文档上传 16-bit PCM WAV 或 Ogg Opus 音频并返回识别文本；
+ * 本地预检格式、8 MiB 上限与 WAV ≤ 120 秒时长，Ogg Opus 时长由上游与后续路由层进一步约束。
  */
 export async function callDeepSeekAsr(
   requestJson: EndpointJsonRequester,
@@ -84,6 +138,15 @@ export async function callDeepSeekAsr(
       'UPLOAD_TOO_LARGE',
       'DeepSeek ASR 单文件大小上限为 8 MiB。'
     );
+  }
+  if (normalizedMime === 'audio/wav' || normalizedMime === 'audio/x-wav') {
+    const durationSeconds = estimateWavDurationSeconds(input.audioBytes);
+    if (durationSeconds !== null && durationSeconds > DEEPSEEK_ASR_MAX_DURATION_SECONDS) {
+      throw new CaptureProviderError(
+        'UPLOAD_TOO_LARGE',
+        'DeepSeek ASR 单条语音时长上限为 120 秒。'
+      );
+    }
   }
 
   const form = new FormData();

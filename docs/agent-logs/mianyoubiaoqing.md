@@ -203,3 +203,24 @@
 - **验证**：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend exec vitest run`（27 文件 210 项，含 M1 #6 5 文件 25 项）、`pnpm --filter frontend exec vitest run`（12 文件 73 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 与 LF/EOF 检查全部通过。
 - **人工审核**：PR #30 修复已推送并回复复审人 `@Tarnishedtaffy`，待复审通过。
 - **遗留问题**：`#24` 仍处于「有条件确认 / 待正文冻结」阶段，待 `#23`（v1.5）合并且 `#24` 补齐 §2.10/§2.6 确认后再挂载 `/api/capture/*` 路由并执行内部失败码到契约 HTTP 错误码的映射。
+
+### LOG-mianyoubiaoqing-20261120-04
+
+- **时间**：2026-11-20 16:02（+08:00）
+- **工具/模型**：Antigravity / Orchestrator
+- **模块 / 分支 / PR**：M1 / `feat/m1-capture-extraction` / [#30](https://github.com/Tarnishedtaffy/2026gdufai/pull/30)
+- **任务**：修复 PR #30 二轮复审及追加 P3（`@Tarnishedtaffy`、`@yukacezar569-blip`）指出的上传存储安全边界（P1/P2/P3）、DeepSeek ASR 时长预检与跨服务源密钥守卫。
+- **关键提示词**：
+  - 读一下 PR 的新 comment
+  - 读一下新 comment，然后一起修了吧
+- **代理做了什么**：
+  - **P1/P3 受控存储安全边界（`backend/src/modules/capture/storage.ts`）**：读写路径均先校验 `uploadDir` 与各层子目录 `YYYY`/`MM` 非符号链接且 `realpath` 严格位于 `realpath(uploadDir)` 内；`saveCaptureUpload` 取消跟随符号链接的 `mkdir(..., { recursive: true })`，改为逐级 `mkdir` + `lstat` + `realpath` 并以 `O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW` 独占创建常规文件（Windows `O_NOFOLLOW` 为 `undefined` 时安全回退为 `0` 且保留逐级 `lstat` + `realpath` 校验）；`readCaptureUpload` 改为先逐级 `lstat`/`realpath`，再以 `O_RDONLY | O_NOFOLLOW` 打开句柄，交叉校验 `handle.stat()` 与 `realpath` 的 `dev`/`ino`、拒绝 `nlink > 1` 多硬链接，并在读取前按图片 ≤ 10 MiB / 语音 ≤ 15 MiB 校验 `size`（防 TOCTOU 与大文件读入内存）。
+  - **P2 原型链继承键防护**：将 `storage.ts` 的 `MIME_SPECS`、`EXT_TO_MEDIA` 及 `deepseek-tools.ts` 的 `MIME_TO_IMAGE_EXT` 全部重构为 `Map`，彻底拒绝 `constructor`、`__proto__`、`toString` 等继承属性。
+  - **P3 ASR WAV 120s 预检与跨源密钥守卫**：在 `deepseek-tools.ts` 增加 RIFF/WAVE 头解析 `estimateWavDurationSeconds`，对超 120 秒 WAV 本地拦截并返回 `UPLOAD_TOO_LARGE`（Ogg Opus 时长约束同步记入 README/ADR-0002）；将 `backend/src/config/ai.ts` 的跨主机拦截推广到全部配置——`OCR_API_BASE_URL` / `ASR_API_BASE_URL` 与 `LLM_API_BASE_URL` 不同源（origin）且未独立配置密钥时直接抛错，防止非 DeepSeek 场景跨主机透传 `LLM_API_KEY`。
+  - **回归测试**：在 `backend/test/capture/multimodal-pipeline.test.ts` 与 `openai-compatible-provider.test.ts` 新增原型链 MIME 键拒绝、年/月两级父目录 symlink（Windows junction / POSIX dir）读写拒绝、多硬链接拒绝、读取超大文件拒绝、WAV > 120s 预检与非 DeepSeek 跨源 Key 拦截至 28 项 M1 #6 单元测试全部覆盖。
+- **决策**：
+  - `readCaptureUpload` 与 `saveCaptureUpload` 同时采用逐级 `lstat`/`realpath` 与 `fd.stat()` 节点比对，既消除 POSIX TOCTOU / hardlink / O_NOFOLLOW 风险，也保证跨平台（Windows + Linux 容器）一致生效。
+  - 仅在相同 `origin`（scheme + host + port）时允许 OCR/ASR 回退复用 `LLM_API_KEY`，协议降级或不同域名一律要求显式配置独立密钥。
+- **验证**：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend exec vitest run`、`pnpm --filter frontend exec vitest run`、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 与 LF/EOF 检查全部通过。
+- **人工审核**：PR #30 修复已推送并回复 `@Tarnishedtaffy` 与 `@yukacezar569-blip`，待复审通过。
+- **遗留问题**：`#24` 对外路由与完整上传识别闭环、Ogg Opus 路由层时长校验以及 `CaptureResult` 新增字段待 `#23`（v1.5）合并与后续 PR 推进。

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -342,5 +342,118 @@ describe('M1 第三阶段：受控上传存储与语音/小票流水线', () => 
         field: 'referenceTime'
       })
     });
+  });
+
+  it('MIME_SPECS / EXT_TO_MEDIA 拒绝原型链继承键（P2 回归）', async () => {
+    const uploadDir = await makeUploadDir();
+
+    for (const protoKey of ['constructor', '__proto__', 'toString', 'valueOf']) {
+      const outcome = await saveCaptureUpload({
+        uploadDir,
+        bytes: Buffer.from([1, 2, 3]),
+        mimeType: protoKey
+      });
+      expect(outcome).toEqual({
+        ok: false,
+        failure: expect.objectContaining({ code: 'UPLOAD_UNSUPPORTED_TYPE' })
+      });
+    }
+
+    expect(await readdir(uploadDir)).toEqual([]);
+  });
+
+  it('父目录符号链接逃逸在读写路径均被拒绝（P1 回归）', async () => {
+    const dirType = process.platform === 'win32' ? 'junction' : 'dir';
+    const fixedTime = new Date('2026-11-19T10:00:00+08:00');
+
+    // 年份层级（uploadDir/2026 -> outsideDir）符号链接逃逸拦截
+    const uploadDir = await makeUploadDir();
+    const outsideDir = await makeUploadDir();
+    const outsideMonthDir = join(outsideDir, '11');
+    await mkdir(outsideMonthDir, { recursive: true });
+    await writeFile(join(outsideMonthDir, 'secret.jpg'), JPEG_BYTES);
+    await symlink(outsideDir, join(uploadDir, '2026'), dirType);
+
+    const readYearEscape = await readCaptureUpload(uploadDir, 'uploads/2026/11/secret.jpg');
+    expect(readYearEscape).toEqual({
+      ok: false,
+      failure: expect.objectContaining({ code: 'INVALID_SOURCE_REF' })
+    });
+
+    const saveYearEscape = await saveCaptureUpload({
+      uploadDir,
+      bytes: PNG_BYTES,
+      mimeType: 'image/png',
+      now: fixedTime
+    });
+    expect(saveYearEscape).toEqual({
+      ok: false,
+      failure: expect.objectContaining({ code: 'INVALID_SOURCE_REF' })
+    });
+    expect(await readdir(outsideMonthDir)).toEqual(['secret.jpg']);
+
+    // 月份层级（uploadDir2/2026/11 -> outsideTargetDir）符号链接逃逸拦截
+    const uploadDir2 = await makeUploadDir();
+    const outsideTargetDir = await makeUploadDir();
+    await writeFile(join(outsideTargetDir, 'secret.jpg'), JPEG_BYTES);
+    await mkdir(join(uploadDir2, '2026'), { recursive: true });
+    await symlink(outsideTargetDir, join(uploadDir2, '2026', '11'), dirType);
+
+    const readMonthEscape = await readCaptureUpload(uploadDir2, 'uploads/2026/11/secret.jpg');
+    expect(readMonthEscape).toEqual({
+      ok: false,
+      failure: expect.objectContaining({ code: 'INVALID_SOURCE_REF' })
+    });
+
+    const saveMonthEscape = await saveCaptureUpload({
+      uploadDir: uploadDir2,
+      bytes: PNG_BYTES,
+      mimeType: 'image/png',
+      now: fixedTime
+    });
+    expect(saveMonthEscape).toEqual({
+      ok: false,
+      failure: expect.objectContaining({ code: 'INVALID_SOURCE_REF' })
+    });
+    expect(await readdir(outsideTargetDir)).toEqual(['secret.jpg']);
+  });
+
+  it('readCaptureUpload 拒绝多硬链接与超大小上限文件，并支持自动创建不存在的 uploadDir（P3 回归）', async () => {
+    const uploadDir = await makeUploadDir();
+    const outsideDir = await makeUploadDir();
+    const monthDir = join(uploadDir, '2026', '11');
+    await mkdir(monthDir, { recursive: true });
+
+    const outsideFile = join(outsideDir, 'outside.jpg');
+    await writeFile(outsideFile, JPEG_BYTES);
+    await link(outsideFile, join(monthDir, 'hardlinked.jpg'));
+
+    const hardlinkRead = await readCaptureUpload(uploadDir, 'uploads/2026/11/hardlinked.jpg');
+    expect(hardlinkRead).toEqual({
+      ok: false,
+      failure: expect.objectContaining({ code: 'INVALID_SOURCE_REF' })
+    });
+
+    const oversizedPath = join(monthDir, 'oversized.png');
+    await writeFile(oversizedPath, Buffer.concat([PNG_BYTES, Buffer.alloc(10 * 1024 * 1024)]));
+    const oversizedRead = await readCaptureUpload(uploadDir, 'uploads/2026/11/oversized.png');
+    expect(oversizedRead).toEqual({
+      ok: false,
+      failure: expect.objectContaining({ code: 'UPLOAD_TOO_LARGE' })
+    });
+
+    const tempParent = await makeUploadDir();
+    const freshUploadDir = join(tempParent, 'nested-uploads');
+    const saved = await saveCaptureUpload({
+      uploadDir: freshUploadDir,
+      bytes: PNG_BYTES,
+      mimeType: 'image/png',
+      now: new Date(REFERENCE_TIME)
+    });
+    expect(saved.ok).toBe(true);
+    if (saved.ok) {
+      const readBack = await readCaptureUpload(freshUploadDir, saved.upload.sourceRef);
+      expect(readBack.ok).toBe(true);
+    }
   });
 });

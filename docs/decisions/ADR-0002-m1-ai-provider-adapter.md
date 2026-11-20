@@ -32,8 +32,8 @@ M1（#6）需要同时承载三类外部 AI 能力：
 2. 默认实现 `createOpenAiCompatibleProvider` 使用 Node 22 原生 `fetch`：
    - 文本与追问抽取：`POST {LLM_API_BASE_URL}/chat/completions`（`response_format: { type: 'json_object' }`，`temperature: 0`）；
    - 小票图像识别：支持双协议切换——`openai-vision` 走 `POST {OCR_API_BASE_URL}/chat/completions`（Vision `image_url` base64 data URL 仅在服务端出站报文中使用，不写入 `sourceRef` 或日志）；`deepseek-ocr`（DeepSeek 域名默认）走 `POST {OCR_API_BASE_URL}/tools/ocr`（`multipart/form-data`，`purpose="text_recognition"`）提取票面文字后再交由 `LLM` 结构化抽取为标准草稿；
-   - 语音转写：支持双协议切换——`openai-asr` 走 `POST {ASR_API_BASE_URL}/audio/transcriptions`；`deepseek-asr`（DeepSeek 域名默认）走 `POST {ASR_API_BASE_URL}/tools/asr`（`multipart/form-data`，上传受控落盘音频，支持 16-bit PCM WAV / Ogg Opus，≤ 8 MiB / 120s）；
-3. `OCR_*` 与 `ASR_*` 的地址/密钥未单独设置时默认回退复用 `LLM_API_BASE_URL` / `LLM_API_KEY`，避免配置繁琐，同时允许按 `OCR_PROTOCOL` / `ASR_PROTOCOL` 将 OCR/ASR 切换到独立模型或端点。
+   - 语音转写：支持双协议切换——`openai-asr` 走 `POST {ASR_API_BASE_URL}/audio/transcriptions`；`deepseek-asr`（DeepSeek 域名默认）走 `POST {ASR_API_BASE_URL}/tools/asr`（`multipart/form-data`，上传受控落盘音频，支持 16-bit PCM WAV / Ogg Opus，≤ 8 MiB / 120s；本地预检格式、8 MiB 与 WAV ≤ 120s，Ogg Opus 时长由上游与后续路由层进一步约束）；
+3. `OCR_*` 与 `ASR_*` 的地址未单独设置时默认复用 `LLM_API_BASE_URL`，仅当与 `LLM` 共享同一服务源（origin）时回退复用 `LLM_API_KEY`（跨源必须单独配置 `OCR_API_KEY` / `ASR_API_KEY`），避免跨主机凭据泄漏，同时允许按 `OCR_PROTOCOL` / `ASR_PROTOCOL` 切换独立模型或端点。
 
 ## 理由
 

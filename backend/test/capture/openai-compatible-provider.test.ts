@@ -7,6 +7,26 @@ import {
   createOpenAiCompatibleProvider
 } from '../../src/modules/capture/index.ts';
 
+function buildPcmWav(durationSeconds: number, sampleRate = 4000): Uint8Array {
+  const byteRate = sampleRate * 2;
+  const dataBytes = byteRate * durationSeconds;
+  const buf = Buffer.alloc(44 + dataBytes);
+  buf.write('RIFF', 0, 'ascii');
+  buf.writeUInt32LE(36 + dataBytes, 4);
+  buf.write('WAVE', 8, 'ascii');
+  buf.write('fmt ', 12, 'ascii');
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(byteRate, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write('data', 36, 'ascii');
+  buf.writeUInt32LE(dataBytes, 40);
+  return buf;
+}
+
 describe('OpenAI 兼容与 DeepSeek 工具接口适配器', () => {
   it('loadAiConfig 支持默认值、OCR/ASR 回退、协议自动判别与独立覆盖', () => {
     const fallbackCfg = loadAiConfig({
@@ -104,7 +124,7 @@ describe('OpenAI 兼容与 DeepSeek 工具接口适配器', () => {
     expect(() => loadAiConfig({ OCR_PROTOCOL: 'invalid-ocr' })).toThrow();
     expect(() => loadAiConfig({ ASR_PROTOCOL: 'invalid-asr' })).toThrow();
 
-    // 防止 DeepSeek 回退密钥被误发往非 DeepSeek 地址。
+    // 防止 DeepSeek 回退密钥与普通 LLM_API_KEY 跨服务源透传。
     expect(() =>
       loadAiConfig({
         DEEPSEEK_API_KEY: 'sk-deepseek-stub',
@@ -123,6 +143,43 @@ describe('OpenAI 兼容与 DeepSeek 工具接口适配器', () => {
         ASR_API_BASE_URL: 'https://api.openai.com/v1'
       })
     ).toThrow();
+    expect(() =>
+      loadAiConfig({
+        LLM_API_BASE_URL: 'https://api.openai.com/v1',
+        LLM_API_KEY: 'sk-openai-only',
+        OCR_API_BASE_URL: 'https://api.siliconflow.cn/v1'
+      })
+    ).toThrow();
+    expect(() =>
+      loadAiConfig({
+        LLM_API_BASE_URL: 'https://api.openai.com/v1',
+        LLM_API_KEY: 'sk-openai-only',
+        ASR_API_BASE_URL: 'https://asr.example.com/v1'
+      })
+    ).toThrow();
+    expect(() =>
+      loadAiConfig({
+        LLM_API_BASE_URL: 'https://api.openai.com/v1',
+        LLM_API_KEY: 'sk-openai-only',
+        OCR_API_BASE_URL: 'http://api.openai.com/v1'
+      })
+    ).toThrow();
+    const sameOriginPath = loadAiConfig({
+      LLM_API_BASE_URL: 'https://api.openai.com/v1',
+      LLM_API_KEY: 'sk-openai-only',
+      OCR_API_BASE_URL: 'https://api.openai.com/v2'
+    });
+    expect(sameOriginPath.ocr.apiKey).toBe('sk-openai-only');
+    const explicitCrossOrigin = loadAiConfig({
+      LLM_API_BASE_URL: 'https://api.openai.com/v1',
+      LLM_API_KEY: 'sk-openai-only',
+      OCR_API_BASE_URL: 'https://api.siliconflow.cn/v1',
+      OCR_API_KEY: 'sk-ocr-explicit',
+      ASR_API_BASE_URL: 'https://asr.example.com/v1',
+      ASR_API_KEY: 'sk-asr-explicit'
+    });
+    expect(explicitCrossOrigin.ocr.apiKey).toBe('sk-ocr-explicit');
+    expect(explicitCrossOrigin.asr.apiKey).toBe('sk-asr-explicit');
 
     // 模拟真实复制 .env.example 后仅填写 DEEPSEEK_API_KEY 的场景。
     const envExamplePath = resolve(import.meta.dirname, '../../../.env.example');
@@ -321,7 +378,7 @@ describe('OpenAI 兼容与 DeepSeek 工具接口适配器', () => {
     expect((lastCall.body as FormData).get('file')).toBeTruthy();
     expect((lastCall.body as FormData).get('model')).toBeNull();
 
-    // DeepSeek ASR 应在发请求前拦截超格式与超 8 MiB 文件。
+    // DeepSeek ASR 应在发请求前拦截超格式、超 8 MiB 与超过 120 秒 WAV 文件。
     const callsBeforePrecheck = calls.length;
     await expect(
       provider.transcribeAudio({
@@ -337,7 +394,33 @@ describe('OpenAI 兼容与 DeepSeek 工具接口适配器', () => {
         filename: 'too-big.wav'
       })
     ).rejects.toMatchObject({ code: 'UPLOAD_TOO_LARGE' });
+    await expect(
+      provider.transcribeAudio({
+        audioBytes: buildPcmWav(121),
+        mimeType: 'audio/wav',
+        filename: 'too-long.wav'
+      })
+    ).rejects.toMatchObject({ code: 'UPLOAD_TOO_LARGE' });
     expect(calls.length).toBe(callsBeforePrecheck);
+
+    const validDurationWav = await provider.transcribeAudio({
+      audioBytes: buildPcmWav(10),
+      mimeType: 'audio/wav',
+      filename: 'ok-10s.wav'
+    });
+    expect(validDurationWav).toBe('打车三十八块五');
+
+    // 原型链键不会导致 DeepSeek OCR 上传文件名出现函数字符串。
+    ocrMode = 'receipt';
+    await provider.completeVisionJson({
+      systemPrompt: 'sys-ocr',
+      userPrompt: 'usr-ocr',
+      imageBytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]),
+      mimeType: 'constructor'
+    });
+    const protoOcrForm = calls[calls.length - 2]!.body as FormData;
+    const uploadedFile = protoOcrForm.get('file') as File;
+    expect(uploadedFile.name).toBe('receipt.png');
   });
 
   it('AI_TIMEOUT_MS 同时覆盖响应头返回后响应体读取挂起的场景', async () => {

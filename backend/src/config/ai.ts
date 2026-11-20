@@ -91,6 +91,10 @@ function isDeepSeekHost(baseUrl: string): boolean {
   return host === 'api.deepseek.com' || host.endsWith('.deepseek.com');
 }
 
+function getEndpointOrigin(baseUrl: string): string {
+  return new URL(baseUrl).origin.toLowerCase();
+}
+
 function parseProtocol<T extends string>(
   value: string | undefined,
   allowed: readonly T[],
@@ -110,7 +114,7 @@ function parseProtocol<T extends string>(
 /**
  * 读取并校验外部 AI 服务端点配置。
  * 未显式配置 LLM_API_KEY 时支持回退读取 DEEPSEEK_API_KEY（默认 https://api.deepseek.com/v1 + deepseek-flash）；
- * OCR 与 ASR 未单独配置时回退复用 LLM 的地址和密钥，并按服务商域名自动选择协议。
+ * OCR 与 ASR 仅在与 LLM 共享同一服务源（origin）时回退复用 LLM 密钥，跨主机地址必须单独配置对应密钥。
  */
 export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   const explicitLlmKey = normalizeApiKey(env.LLM_API_KEY, null);
@@ -134,14 +138,16 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
       isDeepSeekHost(llmBaseUrl) ? DEFAULT_DEEPSEEK_MODEL : DEFAULT_LLM_MODEL
     )
   };
+  const llmOrigin = getEndpointOrigin(llm.baseUrl);
 
   const ocrBaseUrl = normalizeBaseUrl(env.OCR_API_BASE_URL, llm.baseUrl, 'OCR_API_BASE_URL');
-  const ocrApiKey = normalizeApiKey(env.OCR_API_KEY, llm.apiKey);
-  if (deepseekKey !== null && ocrApiKey === deepseekKey && !isDeepSeekHost(ocrBaseUrl)) {
+  const explicitOcrKey = normalizeApiKey(env.OCR_API_KEY, null);
+  if (explicitOcrKey === null && llm.apiKey !== null && getEndpointOrigin(ocrBaseUrl) !== llmOrigin) {
     throw new Error(
-      '使用 DEEPSEEK_API_KEY 回退时，非 DeepSeek 的 OCR_API_BASE_URL 必须单独配置 OCR_API_KEY。'
+      'OCR_API_BASE_URL 与 LLM_API_BASE_URL 不属于同一服务源时，必须单独配置 OCR_API_KEY，禁止跨主机透传 LLM 密钥。'
     );
   }
+  const ocrApiKey = explicitOcrKey ?? llm.apiKey;
   const ocr: OcrEndpointConfig = {
     baseUrl: ocrBaseUrl,
     apiKey: ocrApiKey,
@@ -155,12 +161,13 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   };
 
   const asrBaseUrl = normalizeBaseUrl(env.ASR_API_BASE_URL, llm.baseUrl, 'ASR_API_BASE_URL');
-  const asrApiKey = normalizeApiKey(env.ASR_API_KEY, llm.apiKey);
-  if (deepseekKey !== null && asrApiKey === deepseekKey && !isDeepSeekHost(asrBaseUrl)) {
+  const explicitAsrKey = normalizeApiKey(env.ASR_API_KEY, null);
+  if (explicitAsrKey === null && llm.apiKey !== null && getEndpointOrigin(asrBaseUrl) !== llmOrigin) {
     throw new Error(
-      '使用 DEEPSEEK_API_KEY 回退时，非 DeepSeek 的 ASR_API_BASE_URL 必须单独配置 ASR_API_KEY。'
+      'ASR_API_BASE_URL 与 LLM_API_BASE_URL 不属于同一服务源时，必须单独配置 ASR_API_KEY，禁止跨主机透传 LLM 密钥。'
     );
   }
+  const asrApiKey = explicitAsrKey ?? llm.apiKey;
   const asr: AsrEndpointConfig = {
     baseUrl: asrBaseUrl,
     apiKey: asrApiKey,
