@@ -112,6 +112,55 @@ describe('PATCH /api/transactions/:id', () => {
     expect(result.body).toMatchObject({ error: { code: 'INVALID_QUERY_PARAM', field: 'status' } });
   });
 
+  it('中性记录不允许 PATCH 或 void', async () => {
+    const id = insertTransaction();
+    db.prepare("UPDATE transactions SET entry_type = 'repayment' WHERE id = ?").run(id);
+
+    const patched = await patch(id, { amountCents: 100 });
+    expect(patched.status).toBe(422);
+    expect(patched.body).toMatchObject({
+      error: { code: 'INVALID_QUERY_PARAM', field: 'entryType' }
+    });
+
+    const voided = await voidById(id);
+    expect(voided.status).toBe(422);
+    expect(voided.body).toMatchObject({
+      error: { code: 'INVALID_QUERY_PARAM', field: 'entryType' }
+    });
+  });
+
+  it('只改金额不丢失 time_source / chat_at', async () => {
+    const id = insertTransaction();
+    db.prepare(
+      "UPDATE transactions SET time_source = 'chat_time', chat_at = '2026-11-14T10:00:00+08:00' WHERE id = ?"
+    ).run(id);
+
+    const result = await patch(id, { amountCents: 5000 });
+    expect(result.status).toBe(200);
+
+    const row = db.prepare('SELECT time_source, chat_at FROM transactions WHERE id = ?').get(id) as {
+      time_source: string;
+      chat_at: string | null;
+    };
+    expect(row).toEqual({ time_source: 'chat_time', chat_at: '2026-11-14T10:00:00+08:00' });
+  });
+
+  it('金额超过安全整数返回 422', async () => {
+    const id = insertTransaction();
+    expect((await patch(id, { amountCents: 1e20 })).status).toBe(422);
+  });
+
+  it('改类别后 category_source 记为 manual', async () => {
+    const id = insertTransaction();
+    const result = await patch(id, { categoryId: 9 });
+    expect(result.status).toBe(200);
+
+    const row = db.prepare('SELECT category_source FROM transactions WHERE id = ?').get(id) as {
+      category_source: string;
+    };
+    expect(row.category_source).toBe('manual');
+  });
+
   it('账单不存在返回 404', async () => {
     const result = await patch('tx_missing', { amountCents: 100 });
     expect(result.status).toBe(404);

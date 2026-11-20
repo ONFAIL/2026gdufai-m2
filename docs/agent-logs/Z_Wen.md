@@ -493,3 +493,20 @@ ejected；
 - **验证**：`typecheck` / `lint` / `test` 全绿，backend 16 文件 **92 例**
 - **人工审核**：待开 PR
 - **遗留问题**：等 #17 合并后开 PR；契约新增 `TRANSACTION_NOT_FOUND` 需在 issue 登记
+### LOG-Z_Wen-20261120-05
+
+- **时间**：2026-11-20 14:45（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-transaction-edit` / #26
+- **任务**：按 #26 Review 收口中性记录与字段重置
+- **关键提示词**：reviewer 指出中性退款/还款可被 PATCH/void、无条件重置 time_source、金额缺安全整数上界
+- **代理做了什么**：
+  - `findTransaction` 读取 `entry_type`；PATCH / void 对 `entry_type != 'normal'` 返回 422（`field: entryType`）
+  - UPDATE 改为按传入字段动态拼 SET：只改金额/商户不再重置 `time_source` / `chat_at` / `direction_source`
+  - 改类别时 `category_source='manual'`
+  - `amountCents` 改用 `Number.isSafeInteger`
+  - 新增 4 个测试：中性记录拒改/拒作废、只改金额保留 chat_time、1e20 拒绝、category_source manual
+- **决策**：中性记录的撤销留给 PR-C 的专门接口；本 PR 只做「禁止直接编辑」
+- **验证**：backend 23 文件 **199 例**通过，lint / diff check 通过
+- **人工审核**：待新 PR 复审
+- **遗留问题**：`TRANSACTION_NOT_FOUND` 的 contract-change issue 需补；void 重算 `settled_at` / `#interest` 在 PR-C
