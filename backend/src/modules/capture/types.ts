@@ -96,7 +96,9 @@ export interface CaptureAiProvider {
 export type CaptureProviderErrorCode =
   | 'AI_NOT_CONFIGURED'
   | 'AI_UPSTREAM_ERROR'
-  | 'AI_INVALID_OUTPUT';
+  | 'AI_INVALID_OUTPUT'
+  | 'UPLOAD_UNSUPPORTED_TYPE'
+  | 'UPLOAD_TOO_LARGE';
 
 /** 外部 AI 适配层抛出的结构化错误。 */
 export class CaptureProviderError extends Error {

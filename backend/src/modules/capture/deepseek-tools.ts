@@ -13,6 +13,9 @@ export type EndpointJsonRequester = (
   initBuilder: (apiKey: string) => RequestInit
 ) => Promise<unknown>;
 
+const DEEPSEEK_ASR_MAX_BYTES = 8 * 1024 * 1024;
+const DEEPSEEK_ASR_MIMES = new Set(['audio/wav', 'audio/x-wav', 'audio/ogg']);
+
 const MIME_TO_IMAGE_EXT: Readonly<Record<string, string>> = {
   'image/jpeg': 'jpg',
   'image/jpg': 'jpg',
@@ -69,6 +72,20 @@ export async function callDeepSeekAsr(
   endpoint: AsrEndpointConfig,
   input: AudioTranscriptionInput
 ): Promise<string> {
+  const normalizedMime = input.mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
+  if (!DEEPSEEK_ASR_MIMES.has(normalizedMime)) {
+    throw new CaptureProviderError(
+      'UPLOAD_UNSUPPORTED_TYPE',
+      'DeepSeek ASR 仅支持 16-bit PCM WAV 或 Ogg Opus 音频格式。'
+    );
+  }
+  if (input.audioBytes.byteLength > DEEPSEEK_ASR_MAX_BYTES) {
+    throw new CaptureProviderError(
+      'UPLOAD_TOO_LARGE',
+      'DeepSeek ASR 单文件大小上限为 8 MiB。'
+    );
+  }
+
   const form = new FormData();
   form.append(
     'file',

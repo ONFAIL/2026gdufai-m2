@@ -281,4 +281,41 @@ describe('M1 第一阶段：文字记账抽取', () => {
       expect(unconfigured.failure.code).toBe('AI_NOT_CONFIGURED');
     }
   });
+
+  it('保留输入时间中的毫秒精度（含 +08:00 与 UTC Z 换算）', async () => {
+    const extractor = createCaptureExtractor({
+      uploadDir: './uploads',
+      provider: createStubProvider(async () =>
+        JSON.stringify({
+          records: [
+            {
+              amount: 12.5,
+              merchant: '早点摊',
+              occurredAt: '2026-11-19T09:12:34.567+08:00',
+              direction: 'expense',
+              confidence: 0.9,
+              rawText: '早点 12.5'
+            },
+            {
+              amount: 18,
+              merchant: '面馆',
+              occurredAt: '2026-11-19T01:12:34.567Z',
+              direction: 'expense',
+              confidence: 0.9,
+              rawText: '面条 18'
+            }
+          ]
+        })
+      )
+    });
+
+    const outcome = await extractor.extractFromText({
+      rawText: '早点12.5，面条18',
+      referenceTime: REFERENCE_TIME
+    });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.drafts[0]!.occurredAt).toBe('2026-11-19T09:12:34.567+08:00');
+    expect(outcome.drafts[1]!.occurredAt).toBe('2026-11-19T09:12:34.567+08:00');
+  });
 });

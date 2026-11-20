@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadAiConfig, loadConfig } from '../../src/config/index.ts';
 import {
@@ -97,8 +99,52 @@ describe('OpenAI 兼容与 DeepSeek 工具接口适配器', () => {
     expect(() => loadAiConfig({ LLM_API_BASE_URL: 'ftp://invalid.example.com' })).toThrow();
     expect(() => loadAiConfig({ AI_TIMEOUT_MS: '0' })).toThrow();
     expect(() => loadAiConfig({ AI_TIMEOUT_MS: '1000ms' })).toThrow();
+    expect(() => loadAiConfig({ AI_TIMEOUT_MS: '2147483648' })).toThrow();
+    expect(loadAiConfig({ AI_TIMEOUT_MS: '2147483647' }).timeoutMs).toBe(2_147_483_647);
     expect(() => loadAiConfig({ OCR_PROTOCOL: 'invalid-ocr' })).toThrow();
     expect(() => loadAiConfig({ ASR_PROTOCOL: 'invalid-asr' })).toThrow();
+
+    // 防止 DeepSeek 回退密钥被误发往非 DeepSeek 地址。
+    expect(() =>
+      loadAiConfig({
+        DEEPSEEK_API_KEY: 'sk-deepseek-stub',
+        LLM_API_BASE_URL: 'https://api.openai.com/v1'
+      })
+    ).toThrow();
+    expect(() =>
+      loadAiConfig({
+        DEEPSEEK_API_KEY: 'sk-deepseek-stub',
+        OCR_API_BASE_URL: 'https://api.openai.com/v1'
+      })
+    ).toThrow();
+    expect(() =>
+      loadAiConfig({
+        DEEPSEEK_API_KEY: 'sk-deepseek-stub',
+        ASR_API_BASE_URL: 'https://api.openai.com/v1'
+      })
+    ).toThrow();
+
+    // 模拟真实复制 .env.example 后仅填写 DEEPSEEK_API_KEY 的场景。
+    const envExamplePath = resolve(import.meta.dirname, '../../../.env.example');
+    const parsedExample: Record<string, string> = {};
+    for (const rawLine of readFileSync(envExamplePath, 'utf8').split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq > 0) {
+        parsedExample[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+      }
+    }
+    const fromExample = loadAiConfig({ ...parsedExample, DEEPSEEK_API_KEY: 'sk-deepseek-stub' });
+    expect(fromExample.llm).toEqual({
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'sk-deepseek-stub',
+      model: 'deepseek-flash'
+    });
+    expect(fromExample.ocr.baseUrl).toBe('https://api.deepseek.com/v1');
+    expect(fromExample.ocr.protocol).toBe('deepseek-ocr');
+    expect(fromExample.asr.baseUrl).toBe('https://api.deepseek.com/v1');
+    expect(fromExample.asr.protocol).toBe('deepseek-asr');
   });
 
   it('使用 stub fetch 正确调用 OpenAI 兼容文本 JSON、Vision 与 ASR 端点并映射异常', async () => {
@@ -274,5 +320,56 @@ describe('OpenAI 兼容与 DeepSeek 工具接口适配器', () => {
     expect(lastCall.body).toBeInstanceOf(FormData);
     expect((lastCall.body as FormData).get('file')).toBeTruthy();
     expect((lastCall.body as FormData).get('model')).toBeNull();
+
+    // DeepSeek ASR 应在发请求前拦截超格式与超 8 MiB 文件。
+    const callsBeforePrecheck = calls.length;
+    await expect(
+      provider.transcribeAudio({
+        audioBytes: Uint8Array.from([1, 2, 3]),
+        mimeType: 'audio/mpeg',
+        filename: 'voice.mp3'
+      })
+    ).rejects.toMatchObject({ code: 'UPLOAD_UNSUPPORTED_TYPE' });
+    await expect(
+      provider.transcribeAudio({
+        audioBytes: new Uint8Array(8 * 1024 * 1024 + 1),
+        mimeType: 'audio/wav',
+        filename: 'too-big.wav'
+      })
+    ).rejects.toMatchObject({ code: 'UPLOAD_TOO_LARGE' });
+    expect(calls.length).toBe(callsBeforePrecheck);
+  });
+
+  it('AI_TIMEOUT_MS 同时覆盖响应头返回后响应体读取挂起的场景', async () => {
+    const hungBodyFetch: typeof fetch = async () =>
+      ({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => new Promise<unknown>(() => {}),
+        text: () => new Promise<string>(() => {})
+      }) as unknown as Response;
+
+    const provider = createOpenAiCompatibleProvider(
+      loadAiConfig({
+        LLM_API_BASE_URL: 'https://llm.example.com/v1',
+        LLM_API_KEY: 'sk-llm',
+        AI_TIMEOUT_MS: '50'
+      }),
+      hungBodyFetch
+    );
+
+    const t0 = Date.now();
+    await expect(
+      provider.completeJson({ systemPrompt: 's', userPrompt: 'u' })
+    ).rejects.toMatchObject({ code: 'AI_UPSTREAM_ERROR' });
+    await expect(
+      provider.transcribeAudio({
+        audioBytes: Uint8Array.from([1, 2]),
+        mimeType: 'audio/wav',
+        filename: 'a.wav'
+      })
+    ).rejects.toMatchObject({ code: 'AI_UPSTREAM_ERROR' });
+    expect(Date.now() - t0).toBeLessThan(1000);
   });
 });

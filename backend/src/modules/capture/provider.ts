@@ -50,26 +50,6 @@ function extractChoiceContent(payload: unknown): string {
   throw new CaptureProviderError('AI_INVALID_OUTPUT', 'AI 服务响应中缺少 choices[0].message.content。');
 }
 
-async function fetchWithTimeout(
-  fetchFn: typeof fetch,
-  url: string,
-  init: RequestInit,
-  timeoutMs: number
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetchFn(url, { ...init, signal: controller.signal });
-  } catch (error: unknown) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new CaptureProviderError('AI_UPSTREAM_ERROR', `AI 服务请求超时（>${timeoutMs}ms）。`);
-    }
-    throw new CaptureProviderError('AI_UPSTREAM_ERROR', '连接 AI 服务失败，请检查网络与服务地址。');
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function parseJsonResponse(response: Response, label: string): Promise<unknown> {
   if (!response.ok) {
     const rawDetail = await response.text().catch(() => '');
@@ -88,6 +68,55 @@ async function parseJsonResponse(response: Response, label: string): Promise<unk
 }
 
 /**
+ * 在单一超时生命周期内同时覆盖响应头等待与响应体读取，避免上游卡死 body 导致永久挂起。
+ */
+async function runRequestWithTimeout<T>(
+  fetchFn: typeof fetch,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  consumeResponse: (response: Response) => Promise<T>
+): Promise<T> {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutError = (): CaptureProviderError =>
+    new CaptureProviderError('AI_UPSTREAM_ERROR', `AI 服务请求超时（>${timeoutMs}ms）。`);
+
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      reject(timeoutError());
+    }, timeoutMs);
+  });
+
+  const work = (async () => {
+    const response = await fetchFn(url, { ...init, signal: controller.signal });
+    return await consumeResponse(response);
+  })();
+  // 若超时先触发，吞掉后续迟到的 work 异常以免产生未处理拒绝。
+  work.catch(() => {});
+
+  try {
+    return await Promise.race([work, timeoutPromise]);
+  } catch (error: unknown) {
+    if (timedOut || (error instanceof Error && error.name === 'AbortError')) {
+      throw timeoutError();
+    }
+    if (error instanceof CaptureProviderError) {
+      throw error;
+    }
+    throw new CaptureProviderError('AI_UPSTREAM_ERROR', '连接 AI 服务失败，请检查网络与服务地址。');
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+/**
  * 基于 Node 22 原生 fetch 实现多服务商 AI 适配器，见 ADR-0002。
  * 支持 OpenAI 兼容端点（Chat Completions / Vision / /audio/transcriptions）与 DeepSeek /v1/tools/ocr、/v1/tools/asr。
  */
@@ -102,13 +131,13 @@ export function createOpenAiCompatibleProvider(
     initBuilder: (apiKey: string) => RequestInit
   ): Promise<unknown> {
     const apiKey = requireApiKey(endpoint, label);
-    const response = await fetchWithTimeout(
+    return runRequestWithTimeout(
       fetchFn,
       `${endpoint.baseUrl}${path}`,
       initBuilder(apiKey),
-      config.timeoutMs
+      config.timeoutMs,
+      (response) => parseJsonResponse(response, label)
     );
-    return parseJsonResponse(response, label);
   }
 
   async function callChatCompletions(
@@ -183,7 +212,7 @@ export function createOpenAiCompatibleProvider(
       form.append('file', audioBlob, input.filename);
       form.append('model', config.asr.model);
 
-      const response = await fetchWithTimeout(
+      return runRequestWithTimeout(
         fetchFn,
         `${config.asr.baseUrl}/audio/transcriptions`,
         {
@@ -191,38 +220,39 @@ export function createOpenAiCompatibleProvider(
           headers: { authorization: `Bearer ${apiKey}` },
           body: form
         },
-        config.timeoutMs
+        config.timeoutMs,
+        async (response) => {
+          if (!response.ok) {
+            const rawDetail = await response.text().catch(() => '');
+            const snippet = rawDetail.replace(/\s+/g, ' ').slice(0, 160);
+            throw new CaptureProviderError(
+              'AI_UPSTREAM_ERROR',
+              `ASR 语音转写服务返回 HTTP ${response.status}${snippet ? `: ${snippet}` : ''}`,
+              response.status
+            );
+          }
+
+          const contentType = response.headers.get('content-type') ?? '';
+          if (contentType.includes('application/json')) {
+            const payload = (await response.json().catch(() => null)) as { text?: unknown } | null;
+            if (payload !== null && typeof payload.text === 'string') {
+              return payload.text;
+            }
+            throw new CaptureProviderError('AI_INVALID_OUTPUT', 'ASR 服务 JSON 响应缺少 text 字段。');
+          }
+
+          const textBody = await response.text();
+          try {
+            const parsed = JSON.parse(textBody) as { text?: unknown };
+            if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
+              return parsed.text;
+            }
+          } catch {
+            return textBody;
+          }
+          return textBody;
+        }
       );
-
-      if (!response.ok) {
-        const rawDetail = await response.text().catch(() => '');
-        const snippet = rawDetail.replace(/\s+/g, ' ').slice(0, 160);
-        throw new CaptureProviderError(
-          'AI_UPSTREAM_ERROR',
-          `ASR 语音转写服务返回 HTTP ${response.status}${snippet ? `: ${snippet}` : ''}`,
-          response.status
-        );
-      }
-
-      const contentType = response.headers.get('content-type') ?? '';
-      if (contentType.includes('application/json')) {
-        const payload = (await response.json().catch(() => null)) as { text?: unknown } | null;
-        if (payload !== null && typeof payload.text === 'string') {
-          return payload.text;
-        }
-        throw new CaptureProviderError('AI_INVALID_OUTPUT', 'ASR 服务 JSON 响应缺少 text 字段。');
-      }
-
-      const textBody = await response.text();
-      try {
-        const parsed = JSON.parse(textBody) as { text?: unknown };
-        if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
-          return parsed.text;
-        }
-      } catch {
-        return textBody;
-      }
-      return textBody;
     }
   };
 }

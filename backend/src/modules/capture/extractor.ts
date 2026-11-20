@@ -107,10 +107,7 @@ async function runWithSchemaRetry<T>(
     try {
       return { ok: true, value: await runOnce() };
     } catch (error: unknown) {
-      if (
-        error instanceof CaptureProviderError &&
-        (error.code === 'AI_NOT_CONFIGURED' || error.code === 'AI_UPSTREAM_ERROR')
-      ) {
+      if (error instanceof CaptureProviderError && error.code !== 'AI_INVALID_OUTPUT') {
         return { ok: false, failure: { code: error.code, message: error.message } };
       }
       if (attempt === maxRetries) {
@@ -224,6 +221,13 @@ export function createCaptureExtractor(deps: CaptureExtractorDeps): CaptureExtra
         return fileOutcome;
       }
 
+      let validRefTime: string;
+      try {
+        validRefTime = normalizeReferenceTime(input.referenceTime);
+      } catch (error: unknown) {
+        return failRefTime(error);
+      }
+
       let transcript: string;
       try {
         transcript = (
@@ -248,7 +252,7 @@ export function createCaptureExtractor(deps: CaptureExtractorDeps): CaptureExtra
         };
       }
 
-      return extractDraftsFromRawText(transcript, input.referenceTime, 'voice', input.sourceRef);
+      return extractDraftsFromRawText(transcript, validRefTime, 'voice', input.sourceRef);
     },
 
     async extractFromImage(input: ExtractMediaInput): Promise<DraftExtractionOutcome> {

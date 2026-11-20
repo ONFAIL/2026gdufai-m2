@@ -301,4 +301,46 @@ describe('M1 第三阶段：受控上传存储与语音/小票流水线', () => 
       }
     });
   });
+
+  it('语音抽取在调用付费 ASR 前先校验 referenceTime，非法时间不触发转写', async () => {
+    const uploadDir = await makeUploadDir();
+    const savedAudio = await saveCaptureUpload({
+      uploadDir,
+      bytes: WAV_BYTES,
+      mimeType: 'audio/wav',
+      now: new Date(REFERENCE_TIME)
+    });
+    expect(savedAudio.ok).toBe(true);
+    if (!savedAudio.ok) return;
+
+    let asrCalls = 0;
+    const extractor = createCaptureExtractor({
+      uploadDir,
+      provider: {
+        completeJson: async () => {
+          throw new Error('not expected');
+        },
+        completeVisionJson: async () => {
+          throw new Error('not expected');
+        },
+        transcribeAudio: async () => {
+          asrCalls++;
+          return '不该执行';
+        }
+      }
+    });
+
+    const outcome = await extractor.extractFromVoice({
+      sourceRef: savedAudio.upload.sourceRef,
+      referenceTime: 'not-a-date'
+    });
+    expect(asrCalls).toBe(0);
+    expect(outcome).toEqual({
+      ok: false,
+      failure: expect.objectContaining({
+        code: 'EMPTY_INPUT',
+        field: 'referenceTime'
+      })
+    });
+  });
 });

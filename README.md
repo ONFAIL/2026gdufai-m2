@@ -64,14 +64,14 @@ Compose 构建自动使用 `DEMO_USER_ID` 设置前端的 `VITE_DEMO_USER_ID`。
 
 | 变量 | 默认值 | 用途 | 实现状态 |
 |---|---|---|---|
-| `LLM_API_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容服务基址 | 已接入 `loadAiConfig` 与适配器 |
+| `LLM_API_BASE_URL` | `https://api.openai.com/v1`（仅设 `DEEPSEEK_API_KEY` 时为 `https://api.deepseek.com/v1`） | OpenAI 兼容服务基址 | 已接入 `loadAiConfig` 与适配器 |
 | `LLM_API_KEY` | 空（`null`） | 文本与追问抽取密钥；未配置且无回退时返回 `AI_NOT_CONFIGURED` | 已接入（仅服务端读取，不入前端） |
-| `LLM_MODEL` | `gpt-4o-mini` | 文本与追问抽取模型名 | 已接入 |
+| `LLM_MODEL` | `gpt-4o-mini`（DeepSeek 域名默认 `deepseek-flash`） | 文本与追问抽取模型名 | 已接入 |
 | `DEEPSEEK_API_KEY` | 空（`null`） | 可选快捷回退密钥；未配置 `LLM_API_KEY` 时自动回退为 DeepSeek 默认地址与 `deepseek-flash`，并启用 `/tools/ocr` 与 `/tools/asr` | 已接入 |
 | `OCR_API_BASE_URL` / `OCR_API_KEY` / `OCR_MODEL` / `OCR_PROTOCOL` | 回退复用 `LLM_*`；DeepSeek 域名默认 `deepseek-ocr`，其余默认 `openai-vision` | 小票图片识别独立端点与协议覆盖 | 已接入 |
 | `ASR_API_BASE_URL` / `ASR_API_KEY` / `ASR_PROTOCOL` | 回退复用 `LLM_*`；DeepSeek 域名默认 `deepseek-asr`，其余默认 `openai-asr` | 语音转写独立端点与协议覆盖（DeepSeek 支持 WAV / Ogg Opus，≤ 8 MiB / 120 秒） | 已接入 |
-| `ASR_MODEL` | `whisper-1` | 语音转写模型名 | 已接入 |
-| `AI_TIMEOUT_MS` | `30000` | 外部 AI HTTP 请求超时毫秒数 | 已接入 |
+| `ASR_MODEL` | `whisper-1`（仅 `openai-asr` 使用） | 语音转写模型名 | 已接入 |
+| `AI_TIMEOUT_MS` | `30000` | 外部 AI HTTP 请求超时毫秒数（`1–2147483647`，含响应体读取） | 已接入 |
 
 #### 已有数据卷出现权限错误
 

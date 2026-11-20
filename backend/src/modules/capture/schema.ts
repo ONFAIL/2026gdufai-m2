@@ -159,12 +159,7 @@ export function parseExtractedFollowupPatch(
   }
 
   const trimmedFollowup = followupText.trim();
-  if (Object.hasOwn(rawPatch, 'rawText') && rawPatch.rawText !== undefined) {
-    if (typeof rawPatch.rawText !== 'string' || rawPatch.rawText.trim() === '') {
-      throw new Error('patch.rawText 必须是非空字符串。');
-    }
-    patch.rawText = rawPatch.rawText.trim();
-  } else if (parsed.appendRawText === true && trimmedFollowup !== '') {
+  if (parsed.appendRawText === true && trimmedFollowup !== '') {
     patch.rawText = currentDraft.rawText.includes(trimmedFollowup)
       ? currentDraft.rawText
       : `${currentDraft.rawText}；补充：${trimmedFollowup}`;

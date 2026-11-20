@@ -183,3 +183,23 @@
   - 全仓静态与单测：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend test`（27 文件 206 项）、`pnpm --filter frontend test`（12 文件 73 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 全部通过。
 - **人工审核**：PR [#30](https://github.com/Tarnishedtaffy/2026gdufai/pull/30) 已更新并提交，待 reviewer 审核。
 - **遗留问题**：`POST /api/capture/uploads` 与 `POST /api/capture/extract` 路由挂载及前端附件闭环待 #23（v1.5）冻结后按 #24 写入 v1.6 契约推进。
+
+### LOG-mianyoubiaoqing-20261120-03
+
+- **时间**：2026-11-20 15:17（+08:00）
+- **工具/模型**：Antigravity / Orchestrator
+- **模块 / 分支 / PR**：M1 / `feat/m1-capture-extraction` / [#30](https://github.com/Tarnishedtaffy/2026gdufai/pull/30)
+- **任务**：全面修复 PR #30 复审指出的 1 项 P1、2 项 P2 与 6 项 P3 问题，补齐回归测试并更新 PR 回复。
+- **关键提示词**：
+  - 读一下 PR 的 comment
+  - 开始吧（用户确认修复 PR #30 复审提出的 P1 + P2 + 全部 P3 问题）
+- **代理做了什么**：
+  - **P1 凭据防错发**：清空 `.env.example` 中的 `LLM_API_BASE_URL`、`LLM_MODEL`、`ASR_MODEL` 默认值（保留注释说明），并在 `backend/src/config/ai.ts` 为 `DEEPSEEK_API_KEY` 回退增加跨厂商拦截（回退密钥流向非 DeepSeek 地址时直接抛出配置错误）；补充基于真实 `.env.example` 解析的回归测试。
+  - **P2 反馈码与超时保护**：在 `normalizers.ts` 的 `ACTIVE_CONTRACT_FEEDBACK_CODES` 补全 `#23`（v1.5 §6）已冻结的 4 个反馈码（`ORIGINAL_TRANSACTION_AGED`、`PARTIAL_REPAYMENT_RECORDED`、`AMBIGUOUS_LOAN_PAYMENT`、`ORIGINAL_ALREADY_SETTLED`）；重写 `provider.ts` 为 `runRequestWithTimeout`，用统一 `AbortController` + `Promise.race` 覆盖响应头等待及 `response.json()`/`text()` 读取全生命周期，并补充响应体卡住回归测试。
+  - **全部 P3 收口**：`deepseek-tools.ts` 增加 WAV/Ogg Opus 与 ≤8 MiB 预检；`normalizers.ts` `normalizeOccurredAt` 保留输入毫秒精度；`ai.ts` 增加 `AI_TIMEOUT_MS <= 2_147_483_647` 上限；`extractor.ts` 语音路径在调用付费 ASR 前先校验 `referenceTime`；`schema.ts` 移除模型 `patch.rawText` 覆写分支、仅保留 `appendRawText` 追加；同步更新 PR #30 正文明确 `#24` 待冻结状态及内部失败码与 HTTP 错误码映射关系。
+- **决策**：
+  - 同时采用「模板留空 + 运行时跨厂商校验」双重防线，既满足复制 `.env.example` 后仅填 `DEEPSEEK_API_KEY` 的快捷体验，也杜绝显式改坏 URL 时把 DeepSeek Key 发往第三方。
+  - `ACTIVE_CONTRACT_FEEDBACK_CODES` 在本 PR 内直接补全 22 个现行码（v1.4 18 码 + `#23` v1.5 4 码），待 `@gduf/capture-flow` 后续统一注册表后再复用，确保 v1.5 合入后不阻断追问。
+- **验证**：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend exec vitest run`（27 文件 210 项，含 M1 #6 5 文件 25 项）、`pnpm --filter frontend exec vitest run`（12 文件 73 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 与 LF/EOF 检查全部通过。
+- **人工审核**：PR #30 修复已推送并回复复审人 `@Tarnishedtaffy`，待复审通过。
+- **遗留问题**：`#24` 仍处于「有条件确认 / 待正文冻结」阶段，待 `#23`（v1.5）合并且 `#24` 补齐 §2.10/§2.6 确认后再挂载 `/api/capture/*` 路由并执行内部失败码到契约 HTTP 错误码的映射。

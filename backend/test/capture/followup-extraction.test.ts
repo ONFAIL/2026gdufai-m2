@@ -206,4 +206,49 @@ describe('M1 第二阶段：追问修正与补丁抽取', () => {
     }
     expect(aiCalls).toBe(0);
   });
+
+  it('放行已冻结 #23（v1.5 §6）四个反馈码，且忽略模型擅自回传的 patch.rawText 覆盖', async () => {
+    const v15Codes = [
+      'ORIGINAL_TRANSACTION_AGED',
+      'PARTIAL_REPAYMENT_RECORDED',
+      'AMBIGUOUS_LOAN_PAYMENT',
+      'ORIGINAL_ALREADY_SETTLED'
+    ];
+    const currentDraft: CaptureDraft = {
+      amount: 500,
+      merchant: '贷款银行',
+      occurredAt: '2026-11-19T10:00:00+08:00',
+      direction: null,
+      confidence: 0.85,
+      rawText: '还房贷 500 元',
+      modality: 'text',
+      sourceRef: null
+    };
+
+    const extractor = createCaptureExtractor({
+      uploadDir: './uploads',
+      provider: createStubProvider(async () =>
+        JSON.stringify({
+          patch: { amount: 450, rawText: '模型擅自改写原文' }
+        })
+      )
+    });
+
+    for (const code of v15Codes) {
+      const outcome = await extractor.extractFollowupPatch({
+        currentDraft,
+        followupText: '本金450元',
+        pendingFeedback: [{ field: 'originalTransactionId', code, severity: 'blocking' }],
+        referenceTime: REFERENCE_TIME
+      });
+      expect(outcome).toEqual({
+        ok: true,
+        promptVersion: PROMPT_VERSION_FOLLOWUP,
+        patch: { amount: 450 }
+      });
+      if (outcome.ok) {
+        expect(mergeDraftPatch(currentDraft, outcome.patch).rawText).toBe('还房贷 500 元');
+      }
+    }
+  });
 });

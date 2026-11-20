@@ -35,6 +35,7 @@ const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 const DEFAULT_DEEPSEEK_MODEL = 'deepseek-flash';
 const DEFAULT_ASR_MODEL = 'whisper-1';
 const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 function readPositiveTimeoutMs(value: string | undefined): number {
   if (value === undefined || value.trim() === '') {
@@ -45,8 +46,8 @@ function readPositiveTimeoutMs(value: string | undefined): number {
     throw new Error(`环境变量 AI_TIMEOUT_MS 必须是正整数，当前值: ${value}`);
   }
   const parsed = Number.parseInt(trimmed, 10);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new Error(`环境变量 AI_TIMEOUT_MS 必须是正整数，当前值: ${value}`);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > MAX_TIMEOUT_MS) {
+    throw new Error(`环境变量 AI_TIMEOUT_MS 必须是 1 到 ${MAX_TIMEOUT_MS} 之间的整数，当前值: ${value}`);
   }
   return parsed;
 }
@@ -120,6 +121,11 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     deepseekKey !== null ? DEFAULT_DEEPSEEK_BASE_URL : DEFAULT_BASE_URL,
     'LLM_API_BASE_URL'
   );
+  if (deepseekKey !== null && !isDeepSeekHost(llmBaseUrl)) {
+    throw new Error(
+      '使用 DEEPSEEK_API_KEY 回退时，LLM_API_BASE_URL 不能指向非 DeepSeek 服务商；请改用 LLM_API_KEY 或清空 LLM_API_BASE_URL。'
+    );
+  }
   const llm: AiEndpointConfig = {
     baseUrl: llmBaseUrl,
     apiKey: explicitLlmKey ?? deepseekKey,
@@ -130,9 +136,15 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   };
 
   const ocrBaseUrl = normalizeBaseUrl(env.OCR_API_BASE_URL, llm.baseUrl, 'OCR_API_BASE_URL');
+  const ocrApiKey = normalizeApiKey(env.OCR_API_KEY, llm.apiKey);
+  if (deepseekKey !== null && ocrApiKey === deepseekKey && !isDeepSeekHost(ocrBaseUrl)) {
+    throw new Error(
+      '使用 DEEPSEEK_API_KEY 回退时，非 DeepSeek 的 OCR_API_BASE_URL 必须单独配置 OCR_API_KEY。'
+    );
+  }
   const ocr: OcrEndpointConfig = {
     baseUrl: ocrBaseUrl,
-    apiKey: normalizeApiKey(env.OCR_API_KEY, llm.apiKey),
+    apiKey: ocrApiKey,
     model: normalizeModel(env.OCR_MODEL, llm.model),
     protocol: parseProtocol(
       env.OCR_PROTOCOL,
@@ -143,9 +155,15 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   };
 
   const asrBaseUrl = normalizeBaseUrl(env.ASR_API_BASE_URL, llm.baseUrl, 'ASR_API_BASE_URL');
+  const asrApiKey = normalizeApiKey(env.ASR_API_KEY, llm.apiKey);
+  if (deepseekKey !== null && asrApiKey === deepseekKey && !isDeepSeekHost(asrBaseUrl)) {
+    throw new Error(
+      '使用 DEEPSEEK_API_KEY 回退时，非 DeepSeek 的 ASR_API_BASE_URL 必须单独配置 ASR_API_KEY。'
+    );
+  }
   const asr: AsrEndpointConfig = {
     baseUrl: asrBaseUrl,
-    apiKey: normalizeApiKey(env.ASR_API_KEY, llm.apiKey),
+    apiKey: asrApiKey,
     model: normalizeModel(env.ASR_MODEL, DEFAULT_ASR_MODEL),
     protocol: parseProtocol(
       env.ASR_PROTOCOL,

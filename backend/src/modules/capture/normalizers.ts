@@ -1,6 +1,6 @@
 import type { CaptureDirection, CaptureFailure, PendingFeedbackHint } from './types.ts';
 
-/** 契约 v1.4 §1.5 现行登记的反馈码白名单（不含已废弃的 REFUND_NOT_SUPPORTED 等历史码）。 */
+/** 契约 v1.4 §1.5 + 已冻结 #23（v1.5 §6）现行登记的反馈码白名单（不含已废弃历史码）。 */
 export const ACTIVE_CONTRACT_FEEDBACK_CODES: ReadonlySet<string> = new Set([
   'MISSING_AMOUNT',
   'MISSING_TIME',
@@ -19,7 +19,11 @@ export const ACTIVE_CONTRACT_FEEDBACK_CODES: ReadonlySet<string> = new Set([
   'ORIGINAL_NOT_FOUND_RECORDED',
   'ORIGINAL_AMOUNT_ADJUSTED',
   'REFUND_EXCESS_AS_INCOME',
-  'REPAYMENT_EXCESS_AS_EXPENSE'
+  'REPAYMENT_EXCESS_AS_EXPENSE',
+  'ORIGINAL_TRANSACTION_AGED',
+  'PARTIAL_REPAYMENT_RECORDED',
+  'AMBIGUOUS_LOAN_PAYMENT',
+  'ORIGINAL_ALREADY_SETTLED'
 ]);
 
 const DIRECTIONS: readonly CaptureDirection[] = ['expense', 'income'];
@@ -111,7 +115,7 @@ export function normalizeOccurredAt(value: unknown): string | null {
   if (match === null) {
     throw new Error(`occurredAt 必须是合法的 ISO-8601 时间: ${trimmed}`);
   }
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , tz, , offH, offM] =
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, msText, tz, , offH, offM] =
     match;
   const year = Number(yearText);
   const month = Number(monthText);
@@ -128,16 +132,18 @@ export function normalizeOccurredAt(value: unknown): string | null {
   }
 
   if (tz === '+08:00') {
-    return `${yearText}-${monthText}-${dayText}T${hourText}:${minuteText}:${secondText}+08:00`;
+    const frac = msText !== undefined ? `.${msText}` : '';
+    return `${yearText}-${monthText}-${dayText}T${hourText}:${minuteText}:${secondText}${frac}+08:00`;
   }
 
   const instantMs = Date.parse(trimmed);
   if (Number.isNaN(instantMs)) {
     throw new Error(`occurredAt 无法解析为有效时间戳: ${trimmed}`);
   }
-  return new Date(instantMs + SHANGHAI_OFFSET_MS)
-    .toISOString()
-    .replace(/\.\d{3}Z$/, '+08:00');
+  const shiftedIso = new Date(instantMs + SHANGHAI_OFFSET_MS).toISOString();
+  return msText !== undefined || instantMs % 1000 !== 0
+    ? shiftedIso.replace(/Z$/, '+08:00')
+    : shiftedIso.replace(/\.000Z$/, '+08:00');
 }
 
 /** 校验参考时间（必须是非空且带 +08:00 或合法时区的真实时间）。 */
