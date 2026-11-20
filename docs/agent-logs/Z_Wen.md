@@ -539,3 +539,18 @@
 - **验证**：`pnpm -r typecheck / lint / test / build` 全绿（frontend 73 例、backend 187 例）
 - **人工审核**：待开 PR 并重跑 CI
 - **遗留问题**：PR-B / PR-C 未做
+### LOG-Z_Wen-20261120-03
+
+- **时间**：2026-11-20 14:30（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-loan-interest-a` / PR-A（新 fork）
+- **任务**：按 #27 Review 修复迁移与契约
+- **关键提示词**：reviewer 指出迁移类别 13 关键词少 3 个、同名自定义在任意 id 仍会阻塞预设 13、契约多处仍是 v1.4 口径
+- **代理做了什么**：
+  - 迁移 003 关键词改为 9 个；同名自定义重命名改为与 id 无关（所有 is_preset=0 expense 同名行）
+  - 迁移测试：断言类别 13 关键词含 `还利息/付利息/还息`；新增「同名自定义 id=20 + 交易/预算/规则引用」用例
+  - 契约：`ORIGINAL_NOT_FOUND` 去掉 30 天；`ORIGINAL_AMOUNT_ADJUSTED` 限定退款；`REPAYMENT_EXCESS_AS_EXPENSE` 标 deprecated；补 §1.3 拆分校验、§2.9 void 规则、判断顺序；删除 v1.5 预告
+- **决策**：迁移继续用 `defer_foreign_keys` + 改 id，不改成复制行；同名重命名覆盖任意 id
+- **验证**：backend 23 文件 **187 例**通过；`git diff --check` 无输出
+- **人工审核**：待新 PR 复审
+- **遗留问题**：PR-B / PR-C 未做

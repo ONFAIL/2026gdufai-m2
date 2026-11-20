@@ -62,11 +62,15 @@ describe('迁移 003：贷款利息类别', () => {
 
     const db = openDatabase(path);
 
-    const preset = db.prepare('SELECT name, is_preset FROM categories WHERE id = 13').get() as {
+    const preset = db.prepare('SELECT name, is_preset, keywords FROM categories WHERE id = 13').get() as {
       name: string;
       is_preset: number;
+      keywords: string;
     };
-    expect(preset).toEqual({ name: '贷款利息', is_preset: 1 });
+    expect(preset).toMatchObject({ name: '贷款利息', is_preset: 1 });
+    expect(JSON.parse(preset.keywords)).toEqual(
+      expect.arrayContaining(['还利息', '付利息', '还息'])
+    );
 
     const custom = db.prepare('SELECT id, name, is_preset FROM categories WHERE name = ?').get('宠物') as {
       id: number;
@@ -94,7 +98,7 @@ describe('迁移 003：贷款利息类别', () => {
     db.close();
   });
 
-  it('旧库同名自定义「贷款利息」先重命名，再迁移到 14', () => {
+  it('旧库同名自定义「贷款利息」（任意 id）先重命名，不阻塞预设 13', () => {
     const dir = mkdtempSync(join(tmpdir(), 'm2-migration-same-'));
     dirs.push(dir);
     const path = join(dir, 'legacy.db');
@@ -111,7 +115,30 @@ describe('迁移 003：贷款利息类别', () => {
     raw
       .prepare(
         `INSERT INTO categories (id, name, kind, keywords, color, icon, sort_order, is_preset, is_active, created_at)
-         VALUES (13, '贷款利息', 'expense', '[]', '#000000', '🧾', 13, 0, 1, '2026-11-01T00:00:00+08:00')`
+         VALUES (20, '贷款利息', 'expense', '[]', '#000000', '🧾', 20, 0, 1, '2026-11-01T00:00:00+08:00')`
+      )
+      .run();
+    raw
+      .prepare(
+        `INSERT INTO transactions
+           (id, user_id, direction, direction_source, amount_cents, merchant, note, occurred_at, occurred_date,
+            time_source, chat_at, category_id, category_source, category_confidence, status, source_modality,
+            source_ref, anomaly_flag, idempotency_key, created_at, updated_at)
+         VALUES ('tx_same', 'u_001', 'expense', 'explicit', 1000, '旧商户', NULL,
+                 '2026-11-02T12:00:00+08:00', '2026-11-02', 'explicit', NULL, 20, 'rule', 0.9, 'confirmed',
+                 'text', NULL, 0, 'key_same', '2026-11-02T12:00:00+08:00', '2026-11-02T12:00:00+08:00')`
+      )
+      .run();
+    raw
+      .prepare(
+        `INSERT INTO budgets (user_id, month, scope, category_id, amount_cents, alert_thresholds, created_at, updated_at)
+         VALUES ('u_001', '2026-11', 'category', 20, 10000, '[80,100]', '2026-11-01T00:00:00+08:00', '2026-11-01T00:00:00+08:00')`
+      )
+      .run();
+    raw
+      .prepare(
+        `INSERT INTO user_category_rules (user_id, pattern, category_id, hit_count, last_used_at)
+         VALUES ('u_001', '旧商户', 20, 1, '2026-11-02T12:00:00+08:00')`
       )
       .run();
     raw.close();
@@ -124,9 +151,20 @@ describe('迁移 003：贷款利息类别', () => {
     expect(preset).toEqual({ name: '贷款利息', is_preset: 1 });
 
     const legacy = db
-      .prepare('SELECT id, name, is_preset FROM categories WHERE name = ?')
-      .get('贷款利息(旧)') as { id: number; name: string; is_preset: number };
-    expect(legacy).toEqual({ id: 14, name: '贷款利息(旧)', is_preset: 0 });
+      .prepare('SELECT id, name, is_preset FROM categories WHERE id = 20')
+      .get() as { id: number; name: string; is_preset: number };
+    expect(legacy).toEqual({ id: 20, name: '贷款利息(旧)', is_preset: 0 });
+
+    const tx = db.prepare('SELECT category_id FROM transactions WHERE id = ?').get('tx_same') as {
+      category_id: number;
+    };
+    expect(tx.category_id).toBe(20);
+    const budget = db.prepare('SELECT category_id FROM budgets').get() as { category_id: number };
+    expect(budget.category_id).toBe(20);
+    const rule = db.prepare('SELECT category_id FROM user_category_rules').get() as {
+      category_id: number;
+    };
+    expect(rule.category_id).toBe(20);
     db.close();
   });
 });

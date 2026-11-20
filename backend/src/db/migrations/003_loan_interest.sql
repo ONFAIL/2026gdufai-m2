@@ -17,10 +17,10 @@ SELECT CASE
   ELSE 13
 END AS new_id;
 
--- 同名自定义类别先把名字让出来，避免 UNIQUE(kind, name) 让预设 13 被跳过
+-- 同名自定义类别先把名字让出来（与 id 无关，UNIQUE(kind, name) 才是冲突源）
 UPDATE categories
    SET name = name || '(旧)'
- WHERE id = 13 AND is_preset = 0 AND kind = 'expense' AND name = '贷款利息';
+ WHERE is_preset = 0 AND kind = 'expense' AND name = '贷款利息';
 
 UPDATE categories
    SET id = (SELECT new_id FROM _preset13_migration)
@@ -42,7 +42,7 @@ INSERT OR IGNORE INTO categories
   (id, name, kind, keywords, color, icon, sort_order, is_preset, is_active, created_at)
 VALUES
   (13, '贷款利息', 'expense',
-   '["贷款利息","借款利息","房贷利息","还款利息","利息支出","分期利息"]',
+   '["贷款利息","借款利息","房贷利息","还款利息","利息支出","分期利息","还利息","付利息","还息"]',
    '#14B8A6', '🧾', 13, 1, 1, '2026-11-19T00:00:00+08:00');
 
 DROP TABLE _preset13_migration;
