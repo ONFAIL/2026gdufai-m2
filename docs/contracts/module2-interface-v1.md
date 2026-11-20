@@ -90,6 +90,15 @@
 | `principalCents` | 记录 | 否 | integer ≥ 0 \| `null` | 本次还款中的本金（分）；与 `interestCents` 之和必须等于 `yuanToCents(amount)` |
 | `interestCents` | 记录 | 否 | integer ≥ 0 \| `null` | 本次还款中的利息（分）；只生成类别 13 的支出，不参与剩余本金计算 |
 
+> **还款拆分字段校验**：
+>
+> - `mixed` 时 `principalCents` / `interestCents` 必填，且 `principalCents + interestCents === yuanToCents(amount)`；
+> - 只给一个分字段时，`amount` 必须等于该字段；
+> - `mixed` 且 `amount=null` → `INVALID_BATCH`（`field: records[i].amount`）；
+> - 普通消费/退款传这些字段 → `INVALID_BATCH`（`field: records[i].principalCents`）；
+> - `principalCents > outstandingCents` → `INVALID_BATCH`（`field: records[i].principalCents`）；
+> - 显式字段与文本冲突时以显式字段为准。
+
 > **关于 `direction` 可以传 `null`**：`null` 只出现在**入站**，含义是「模块 1 没有判定」，不是脏数据。模块 2 收到后按优先级解析：类别能识别就用类别 kind 推断；类别也识别不出时兜底到「其他」并按 `expense` 推断。`MISSING_DIRECTION` 保留但当前不可达（见 §1.5），因此 **`transactions.direction` 是非空字段，入库前方向必然已经确定**，不存在把 `null` 写进库的路径。
 >
 > 不让模块 1 强制填写方向，是因为它只能靠猜：猜错会直接污染预算与统计（支出一旦记成收入，当月超支判断就失效），而传 `null` 最多触发一次推断或追问，代价小得多。
@@ -156,13 +165,13 @@
 | `DIRECTION_FORCED_BY_CATEGORY` | 冲突二次以类别为准 | warning | 「按类别记成了收入」 |
 | `DUPLICATE_RECORD` | 幂等键重复 | warning | 「这笔已经记过了」 |
 | `MISSING_ORIGINAL_TRANSACTION` | 退款/还款但缺少原账单 id（首轮） | blocking | 「这笔退款对应哪一笔账单？可以补充金额或日期」 |
-| `ORIGINAL_NOT_FOUND` | 带了原账单 id 但不存在、已作废或超过 30 天（首轮） | blocking | 「没找到这笔原账单，请从账单列表重新选择」 |
+| `ORIGINAL_NOT_FOUND` | 带了原账单 id 但不存在、已作废或非 normal（首轮） | blocking | 「没找到这笔原账单，请从账单列表重新选择」 |
 | `REFUND_RECORDED_NEUTRAL` | 退款已记录为中性，匹配到原账单 | warning | 「已记录为中性，不计入收支；原账单已自动作废」 |
 | `REPAYMENT_RECORDED_NEUTRAL` | 还款已记录为中性，匹配到原账单 | warning | 「已记录为中性，不计入收支；原贷款账单已自动作废」 |
 | `ORIGINAL_NOT_FOUND_RECORDED` | 未匹配到原账单，已归入「其他/其他收入」 | warning | 「没找到原账单，已记为其他且不计收支」 |
-| `ORIGINAL_AMOUNT_ADJUSTED` | 退款/还款金额小于原账单，已把原账单金额改为剩余金额 | warning | 「已按差额调整原账单金额」 |
+| `ORIGINAL_AMOUNT_ADJUSTED` | 退款金额小于原账单，已把原账单金额改为剩余金额（v1.5 仅退款；v1.4 历史还款也使用） | warning | 「已按差额调整原账单金额」 |
 | `REFUND_EXCESS_AS_INCOME` | 退款金额大于原账单，多余部分已计入收入 | warning | 「超出原账单的部分已计入收入」 |
-| `REPAYMENT_EXCESS_AS_EXPENSE` | 还款金额大于原贷款，多余部分已计入支出 | warning | 「超出贷款本金的部分已计入支出」 |
+| `REPAYMENT_EXCESS_AS_EXPENSE` | **deprecated**：v1.5 起还款本金超额返回 `INVALID_BATCH`；该码仅解释 v1.4 历史回执 | warning | 「超出贷款本金的部分已计入支出」 |
 | `ORIGINAL_TRANSACTION_AGED` | 原账单距今超过 365 天，仍匹配成功 | warning | 「这笔原账单较早，请确认」 |
 | `PARTIAL_REPAYMENT_RECORDED` | 贷款部分还款，尚未结清 | warning | 「已记录本次还款，贷款尚未结清」 |
 | `AMBIGUOUS_LOAN_PAYMENT` | 本金/利息无法区分 | blocking | 「这笔是还本金还是还利息？」 |
@@ -450,6 +459,7 @@ POST /api/transactions/tx_xxx/void
 规则：
 
 - 仅 `status='confirmed'` 的账单可修改；已作废账单返回 `422 INVALID_QUERY_PARAM`（`field: status`）；
+- 中性记录（`entry_type != 'normal'`）不允许 PATCH；作废中性 `repayment` 时必须重算原贷款 `settled_at`，并同时作废 `${idempotencyKey}#interest` 记录；
 - `void` 幂等：重复调用返回 `200` 与当前 `status='void'`，不重复写入学习规则；
 - 修改分类时写入 `user_category_rules`（下次同商户自动命中）；改到另一侧 `kind` 时翻转 `direction` 并重算当月预算；作废后该账单从统计与预算中排除，但记录保留。
 
@@ -491,16 +501,17 @@ POST /api/transactions/tx_xxx/void
 > diffCents = (principalCents ?? yuanToCents(amount)) - outstandingCents
 > ```
 >
+> 判断顺序：**先**判「未提供拆分且 `yuanToCents(amount) > outstandingCents`」→ `AMBIGUOUS_LOAN_PAYMENT`；**再**判「显式 `principalCents > outstandingCents`」→ `INVALID_BATCH`。
+>
 > - `diffCents = 0`：写 `settled_at`，返回 `REPAYMENT_RECORDED_NEUTRAL`；
 > - `diffCents < 0`：返回 `PARTIAL_REPAYMENT_RECORDED`；
-> - `diffCents > 0`：`principalCents` 超过剩余本金，返回 `INVALID_BATCH`（`field: records[i].principalCents`）；
+> - `diffCents > 0`：理论上不可达（前面已按未拆分/显式本金分别拦截）；若出现，返回 `INVALID_BATCH`（`field: records[i].principalCents`）；
 > - `interestCents` 只生成类别 13 的 `entry_type='normal'` 支出，**不参与** `outstanding`、`settled_at`、超额判断；
-> - 未提供拆分且 `amount > outstandingCents`：返回 `AMBIGUOUS_LOAN_PAYMENT`，要求拆分；
 > - 退款超额仍产生两条记录：中性记录 + 超出部分的 `normal` 记录。
 >
 > **现金流口径**：贷款本金记收入、还款本金记中性、利息记支出，`netCents` 不等于损益；真正的负债/损益模型留给后续 `loans` 维度。
 >
-> **v1.5 预告**：贷款还款的「作废/改额」口径将调整为「保留原单 + 结清标记」，见 #22；v1.4 先按本表执行，退款逻辑不受该调整影响。
+> **v1.5 已生效**：贷款还款改为「保留原单 + `settled_at`」；退款仍按三态（等额作废 / 小于调整 / 大于作废 + 超出记收入）。
 
 ---
 
