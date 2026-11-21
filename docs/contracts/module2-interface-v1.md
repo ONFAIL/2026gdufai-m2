@@ -93,11 +93,24 @@
 > **还款拆分字段校验**：
 >
 > - `mixed` 时 `principalCents` / `interestCents` 必填，且 `principalCents + interestCents === yuanToCents(amount)`；
+> - `repaymentPart='interest'` 时 `principalCents` 为空或 `0`；`repaymentPart='principal'` 时 `interestCents` 为空或 `0`；
+> - 只给 `principalCents` 与 `interestCents`、未给 `repaymentPart` 时按 `mixed` 处理；
 > - 只给一个分字段时，`amount` 必须等于该字段；
 > - `mixed` 且 `amount=null` → `INVALID_BATCH`（`field: records[i].amount`）；
 > - 普通消费/退款传这些字段 → `INVALID_BATCH`（`field: records[i].principalCents`）；
 > - `principalCents > outstandingCents` → `INVALID_BATCH`（`field: records[i].principalCents`）；
 > - 显式字段与文本冲突时以显式字段为准。
+>
+> **本金规范化与落库**：
+>
+> ```text
+> effectivePrincipalCents =
+>   principalCents                     // 显式给出
+>   interest 且未给本金时 0             // 纯利息，不写中性还款记录
+>   未拆分但按还款处理时 yuanToCents(amount)
+> ```
+>
+> 落库 `principal_cents = effectivePrincipalCents`，**不得因客户端省略字段而写 `NULL`**；`mixed` 缺任一项直接拒绝，不自动猜。
 
 > **关于 `direction` 可以传 `null`**：`null` 只出现在**入站**，含义是「模块 1 没有判定」，不是脏数据。模块 2 收到后按优先级解析：类别能识别就用类别 kind 推断；类别也识别不出时兜底到「其他」并按 `expense` 推断。`MISSING_DIRECTION` 保留但当前不可达（见 §1.5），因此 **`transactions.direction` 是非空字段，入库前方向必然已经确定**，不存在把 `null` 写进库的路径。
 >
@@ -164,10 +177,10 @@
 | `TIME_DEFAULTED_TO_CHAT_TIME` | 时间追问不清，已回退聊天时间 | warning | 「时间我按你发消息的时间记了」 |
 | `DIRECTION_FORCED_BY_CATEGORY` | 冲突二次以类别为准 | warning | 「按类别记成了收入」 |
 | `DUPLICATE_RECORD` | 幂等键重复 | warning | 「这笔已经记过了」 |
-| `MISSING_ORIGINAL_TRANSACTION` | 退款/还款但缺少原账单 id（首轮） | blocking | 「这笔退款对应哪一笔账单？可以补充金额或日期」 |
+| `MISSING_ORIGINAL_TRANSACTION` | 退款/还款但缺少原账单 id（首轮） | blocking | 「这笔退款对应哪一笔账单？请从账单列表重新选择原账单（originalTransactionId）」 |
 | `ORIGINAL_NOT_FOUND` | 带了原账单 id 但不存在、已作废或非 normal（首轮） | blocking | 「没找到这笔原账单，请从账单列表重新选择」 |
 | `REFUND_RECORDED_NEUTRAL` | 退款已记录为中性，匹配到原账单 | warning | 「已记录为中性，不计入收支；原账单已自动作废」 |
-| `REPAYMENT_RECORDED_NEUTRAL` | 还款已记录为中性，匹配到原账单 | warning | 「已记录为中性，不计入收支；原贷款账单已自动作废」 |
+| `REPAYMENT_RECORDED_NEUTRAL` | 还款已记录为中性，匹配到原账单 | warning | 「已记录为中性，不计入收支；原贷款已标记结清（settled_at）」 |
 | `ORIGINAL_NOT_FOUND_RECORDED` | 未匹配到原账单，已归入「其他/其他收入」 | warning | 「没找到原账单，已记为其他且不计收支」 |
 | `ORIGINAL_AMOUNT_ADJUSTED` | 退款金额小于原账单，已把原账单金额改为剩余金额（v1.5 仅退款；v1.4 历史还款也使用） | warning | 「已按差额调整原账单金额」 |
 | `REFUND_EXCESS_AS_INCOME` | 退款金额大于原账单，多余部分已计入收入 | warning | 「超出原账单的部分已计入收入」 |
@@ -188,12 +201,24 @@
 - 第 2 轮起，如果时间仍为空或在未来，模块 2 会用 `chatAt`（或批次 `sentAt`）兜底入库，并回 `TIME_DEFAULTED_TO_CHAT_TIME`。
 - 同一笔最多追问 **2 次**：第 1、2 次提交返回 `pending_followup`；第 3 次提交仍无法解决时返回 `rejected`，模块 1 提示用户手动补录。轮次由模块 2 按幂等键维护。
 - 幂等重发时，`feedback` **按原样返回**（保留 `field`、`severity` 与 `candidates`），不得只回 `code`；模块 2 需在 `intake_log` 中保存完整 feedback 对象。
+- 派生记录使用独立幂等键：中性本金记录用 `${idempotencyKey}`，利息记录用 `${idempotencyKey}#interest`，退款超额记录用 `${idempotencyKey}#excess`。重发按主幂等键返回 `duplicate`，并回显 `interestTransactionId`。
 
 ### 1.7 模块 1 必须守的三条
 
 1. **空就是 `null`**，不要用 `0`、`""`、`"未知"` 填充——模块 2 靠 `null` 判断「缺失」，填了假值会被当成真实数据。
 2. **金额传元、不要传分**，也不要自己四舍五入到整数。
 3. **重发必带原 `idempotencyKey`**，否则同一笔会被记两次；模块 2 无法替你纠正。
+
+### 1.8 原账单匹配（1D）
+
+退款/还款只接受显式 `originalTransactionId`，**不做**按金额/日期的自动匹配，也不设固定时间上限。匹配规则：
+
+- 原账单 `occurredAt` 在未来（`Date.parse(original.occurredAt) > now`）→ 按 `ORIGINAL_NOT_FOUND` 处理；
+- 原账单距今超过 365 天：warning `ORIGINAL_TRANSACTION_AGED`，仍允许继续；
+- 按 id 查询保留「已结清」信息，不因 `settled_at` 非空而隐藏：
+  - 存在但已结清 → `ORIGINAL_ALREADY_SETTLED`（blocking）；
+  - 不存在、跨用户或已作废 → `ORIGINAL_NOT_FOUND`（blocking）；
+  - 已结清与「不存在/跨用户/已作废」必须区分，不能合并成 `ORIGINAL_NOT_FOUND`。
 
 ---
 
@@ -460,6 +485,7 @@ POST /api/transactions/tx_xxx/void
 
 - 仅 `status='confirmed'` 的账单可修改；已作废账单返回 `422 INVALID_QUERY_PARAM`（`field: status`）；
 - 中性记录（`entry_type != 'normal'`）不允许 PATCH；作废中性 `repayment` 时必须重算原贷款 `settled_at`，并同时作废 `${idempotencyKey}#interest` 记录；
+- 作废原贷款：关联还款与利息记录保留，但不再参与剩余本金计算；
 - `void` 幂等：重复调用返回 `200` 与当前 `status='void'`，不重复写入学习规则；
 - 修改分类时写入 `user_category_rules`（下次同商户自动命中）；改到另一侧 `kind` 时翻转 `direction` 并重算当月预算；作废后该账单从统计与预算中排除，但记录保留。
 
@@ -509,7 +535,7 @@ POST /api/transactions/tx_xxx/void
 > - `interestCents` 只生成类别 13 的 `entry_type='normal'` 支出，**不参与** `outstanding`、`settled_at`、超额判断；
 > - 退款超额仍产生两条记录：中性记录 + 超出部分的 `normal` 记录。
 >
-> **现金流口径**：贷款本金记收入、还款本金记中性、利息记支出，`netCents` 不等于损益；真正的负债/损益模型留给后续 `loans` 维度。
+> **现金流口径**：贷款本金记收入、还款本金记中性、利息记支出，`netCents` 是「项目收支净额（排除中性本金还款）」，不等于现金流，也不等于损益；真正的负债/损益模型留给后续 `loans` 维度。
 >
 > **v1.5 已生效**：贷款还款改为「保留原单 + `settled_at`」；退款仍按三态（等额作废 / 小于调整 / 大于作废 + 超出记收入）。
 

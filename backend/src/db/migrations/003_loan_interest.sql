@@ -17,10 +17,27 @@ SELECT CASE
   ELSE 13
 END AS new_id;
 
--- 同名自定义类别先把名字让出来（与 id 无关，UNIQUE(kind, name) 才是冲突源）
+-- 同名自定义类别先把名字让出来（与 id 无关，UNIQUE(kind, name) 才是冲突源）。
+-- 若目标名字已被占用，依次尝试下一级后缀，避免重名撞 UNIQUE(kind, name) 导致整个迁移回滚。
 UPDATE categories
-   SET name = name || '(旧)'
- WHERE is_preset = 0 AND kind = 'expense' AND name = '贷款利息';
+   SET name = '贷款利息(旧)'
+ WHERE is_preset = 0 AND kind = 'expense' AND name = '贷款利息'
+   AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.kind = 'expense' AND c.name = '贷款利息(旧)');
+
+UPDATE categories
+   SET name = '贷款利息(旧2)'
+ WHERE is_preset = 0 AND kind = 'expense' AND name = '贷款利息'
+   AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.kind = 'expense' AND c.name = '贷款利息(旧2)');
+
+UPDATE categories
+   SET name = '贷款利息(旧3)'
+ WHERE is_preset = 0 AND kind = 'expense' AND name = '贷款利息'
+   AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.kind = 'expense' AND c.name = '贷款利息(旧3)');
+
+UPDATE categories
+   SET name = '贷款利息(旧4)'
+ WHERE is_preset = 0 AND kind = 'expense' AND name = '贷款利息'
+   AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.kind = 'expense' AND c.name = '贷款利息(旧4)');
 
 UPDATE categories
    SET id = (SELECT new_id FROM _preset13_migration)
@@ -38,7 +55,7 @@ UPDATE user_category_rules
    SET category_id = (SELECT new_id FROM _preset13_migration)
  WHERE category_id = 13;
 
-INSERT OR IGNORE INTO categories
+INSERT INTO categories
   (id, name, kind, keywords, color, icon, sort_order, is_preset, is_active, created_at)
 VALUES
   (13, '贷款利息', 'expense',
