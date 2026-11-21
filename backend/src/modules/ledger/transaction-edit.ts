@@ -67,6 +67,18 @@ export interface PatchTransactionInput {
   readonly occurredAt?: unknown;
 }
 
+const EDITABLE_FIELDS = ['categoryId', 'amountCents', 'merchant', 'occurredAt'] as const;
+
+/** 校验 PATCH body 是普通对象且至少包含一个可编辑字段。 */
+function assertEditableBody(input: unknown): asserts input is PatchTransactionInput {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    invalid('请求体必须是包含可编辑字段的对象', 'body');
+  }
+  if (!EDITABLE_FIELDS.some((field) => field in (input as Record<string, unknown>))) {
+    invalid('至少需要提供 categoryId / amountCents / merchant / occurredAt 之一', 'body');
+  }
+}
+
 export interface PatchedTransaction {
   readonly id: string;
   readonly direction: 'expense' | 'income';
@@ -84,6 +96,7 @@ export function patchTransaction(
   userId: string,
   input: PatchTransactionInput
 ): PatchedTransaction {
+  assertEditableBody(input);
   const current = findTransaction(db, id, userId);
   if (current === null) {
     throw transactionNotFound(id);
@@ -116,7 +129,7 @@ export function patchTransaction(
     }
     categoryId = category.id;
     direction = category.kind;
-    changedCategory = true;
+    changedCategory = category.id !== current.category_id;
   }
 
   if (input.amountCents !== undefined) {
@@ -130,10 +143,12 @@ export function patchTransaction(
     if (typeof input.merchant !== 'string' || input.merchant.trim() === '') {
       invalid('merchant 必须是非空字符串', 'merchant');
     }
-    if (input.merchant.trim().length > 100) {
+    const trimmedMerchant = input.merchant.trim();
+    // 按 Unicode 码点计数，避免 emoji 被算作两个字符。
+    if ([...trimmedMerchant].length > 100) {
       invalid('merchant 最长 100 字符', 'merchant');
     }
-    merchant = input.merchant.trim();
+    merchant = trimmedMerchant;
   }
 
   if (input.occurredAt !== undefined) {
@@ -228,10 +243,10 @@ export function voidTransactionById(db: Db, id: string, userId: string): { id: s
   if (current === null) {
     throw transactionNotFound(id);
   }
+  if (current.entry_type !== 'normal') {
+    invalid('中性记录不允许直接作废', 'entryType');
+  }
   if (current.status !== 'void') {
-    if (current.entry_type !== 'normal') {
-      invalid('中性记录不允许直接作废', 'entryType');
-    }
     db.prepare(
       "UPDATE transactions SET status = 'void', updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(nowIsoShanghai(), id, userId);

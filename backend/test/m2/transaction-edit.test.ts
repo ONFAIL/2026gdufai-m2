@@ -166,6 +166,48 @@ describe('PATCH /api/transactions/:id', () => {
     expect(result.status).toBe(404);
     expect(result.body).toMatchObject({ error: { code: 'TRANSACTION_NOT_FOUND' } });
   });
+
+  it('空对象 body 返回 422', async () => {
+    const id = insertTransaction();
+    const result = await patch(id, {});
+    expect(result.status).toBe(422);
+    expect(result.body).toMatchObject({
+      error: { code: 'INVALID_QUERY_PARAM', field: 'body' }
+    });
+  });
+
+  it('数组 body 返回 422', async () => {
+    const id = insertTransaction();
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/transactions/${id}`,
+      payload: '[]',
+      headers: { 'content-type': 'application/json' }
+    });
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toMatchObject({
+      error: { code: 'INVALID_QUERY_PARAM', field: 'body' }
+    });
+  });
+
+  it('categoryId 与原类别相同不写入学习规则', async () => {
+    const id = insertTransaction(1);
+    db.prepare("UPDATE transactions SET merchant = '同类别商户' WHERE id = ?").run(id);
+
+    const result = await patch(id, { categoryId: 1 });
+    expect(result.status).toBe(200);
+
+    const rule = db
+      .prepare('SELECT category_id FROM user_category_rules WHERE user_id = ? AND pattern = ?')
+      .get('u_001', '同类别商户');
+    expect(rule).toBeUndefined();
+  });
+
+  it('merchant 按 Unicode 码点计算长度', async () => {
+    const id = insertTransaction();
+    expect((await patch(id, { merchant: '😀'.repeat(101) })).status).toBe(422);
+    expect((await patch(id, { merchant: '😀'.repeat(100) })).status).toBe(200);
+  });
 });
 
 describe('POST /api/transactions/:id/void', () => {
@@ -189,5 +231,16 @@ describe('POST /api/transactions/:id/void', () => {
     const result = await voidById('tx_missing_void');
     expect(result.status).toBe(404);
     expect(result.body).toMatchObject({ error: { code: 'TRANSACTION_NOT_FOUND' } });
+  });
+
+  it('中性记录即使已是 void 仍返回 422', async () => {
+    const id = insertTransaction(1, 'void');
+    db.prepare("UPDATE transactions SET entry_type = 'repayment' WHERE id = ?").run(id);
+
+    const result = await voidById(id);
+    expect(result.status).toBe(422);
+    expect(result.body).toMatchObject({
+      error: { code: 'INVALID_QUERY_PARAM', field: 'entryType' }
+    });
   });
 });
