@@ -11,7 +11,7 @@
 
 | # | 功能 | 模块 | 状态 | 验证方式 |
 |---|---|---|---|---|
-| MVP-1 | 自然语言 / 语音记账 + 小票截图 OCR，识别结果可确认修正 | M1 | 待补 | 待补 |
+| MVP-1 | 自然语言 / 语音记账 + 小票截图 OCR，识别结果可确认修正 | M1 | 开发中（后端识别抽取核心已就绪，待接上传/抽取路由与前端联调） | 单元测试 stub；端到端人工验证待补 |
 | MVP-2 | 消费自动分类，按类别 / 时间维度统计 | M2 | 待补 | 待补 |
 | MVP-3 | 自然语言查账（真实解析时间范围与类别） | M3 | 待补 | 待补 |
 | MVP-4 | 月度预算设定与超支提醒 | M4 | 待补 | 待补 |
@@ -21,7 +21,7 @@
 
 - 后端：Node.js + TypeScript + Fastify + SQLite（better-sqlite3）
 - 前端：Vite + Vue 3 + TypeScript
-- AI 能力：LLM / OCR / ASR 服务商待补（需写明模型名称与配置方式）
+- AI 能力：OpenAI 兼容协议统一适配（Node 22 原生 `fetch` 调用 Chat Completions JSON 文本/追问抽取、Vision 多模态小票识别与 `/audio/transcriptions` 语音转写，默认模型参考 `gpt-4o-mini` / `whisper-1`，支持阿里百炼、硅基流动等兼容服务商及 OCR/ASR 独立覆盖；选型见 [ADR-0002](docs/decisions/ADR-0002-m1-ai-provider-adapter.md)）
 - 工程：pnpm workspace、Vitest、Docker Compose
 
 架构与模块边界见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，选型理由见 [ADR-0001](docs/decisions/ADR-0001-tech-stack.md)。
@@ -59,6 +59,19 @@ docker compose up --build
 Compose 构建自动使用 `DEMO_USER_ID` 设置前端的 `VITE_DEMO_USER_ID`。更换演示用户后执行 `docker compose up --build`；直接运行 Docker build 时可用同名 build arg 设置前端用户，并确保运行时 `DEMO_USER_ID` 相同。分开开发前后端时，在根 `.env` 中同时设置这两个变量。
 
 启用 `APP_AUTH_TOKEN` 后，在页面的会话鉴权入口输入同一令牌。API 请求携带 Bearer 头；令牌仅保存在当前页面内存，刷新后重新输入。不要把令牌改成 `VITE_*` 变量或写入前端代码。生产必须配置非占位值。
+
+### AI 服务变量（M1 多模态识别与抽取）
+
+| 变量 | 默认值 | 用途 | 实现状态 |
+|---|---|---|---|
+| `LLM_API_BASE_URL` | `https://api.openai.com/v1`（仅设 `DEEPSEEK_API_KEY` 时为 `https://api.deepseek.com/v1`） | OpenAI 兼容服务基址 | 已接入 `loadAiConfig` 与适配器 |
+| `LLM_API_KEY` | 空（`null`） | 文本与追问抽取密钥；未配置且无回退时返回 `AI_NOT_CONFIGURED` | 已接入（仅服务端读取，不入前端） |
+| `LLM_MODEL` | `gpt-4o-mini`（DeepSeek 域名默认 `deepseek-flash`） | 文本与追问抽取模型名 | 已接入 |
+| `DEEPSEEK_API_KEY` | 空（`null`） | 可选快捷回退密钥；未配置 `LLM_API_KEY` 时自动回退为 DeepSeek 默认地址与 `deepseek-flash`，并启用 `/tools/ocr` 与 `/tools/asr` | 已接入 |
+| `OCR_API_BASE_URL` / `OCR_API_KEY` / `OCR_MODEL` / `OCR_PROTOCOL` | 地址默认复用 `LLM_*`；仅同源回退复用 `LLM` 密钥（跨源须配 `OCR_API_KEY`）；DeepSeek 默认 `deepseek-ocr` | 小票图片识别独立端点与协议覆盖 | 已接入 |
+| `ASR_API_BASE_URL` / `ASR_API_KEY` / `ASR_PROTOCOL` | 地址默认复用 `LLM_*`；仅同源回退复用 `LLM` 密钥（跨源须配 `ASR_API_KEY`）；DeepSeek 默认 `deepseek-asr` | 语音转写独立端点与协议覆盖（DeepSeek 预检 WAV / Ogg Opus、≤ 8 MiB 及 WAV ≤ 120 秒；Ogg Opus 时长由上游与后续路由层约束） | 已接入 |
+| `ASR_MODEL` | `whisper-1`（仅 `openai-asr` 使用） | 语音转写模型名 | 已接入 |
+| `AI_TIMEOUT_MS` | `30000` | 外部 AI HTTP 请求超时毫秒数（`1–2147483647`，含响应体读取） | 已接入 |
 
 #### 已有数据卷出现权限错误
 

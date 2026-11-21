@@ -108,3 +108,119 @@
 - **验证**：首轮 CI 的源码检查 54 秒、Docker job 63 秒通过；日志包含 `node: v22.23.5`、重建后 `Healthy` 和 `Container smoke passed: frontend, API 404, SQLite, non-root user, repaired persistent volumes.`。Action 元数据已核对均使用 node24、现有输入仍受支持；本地 actionlint 与 diff 检查在提交前执行，升级后的远端结果将在 PR 验证区更新。
 - **人工审核**：用户已授权重跑与修复；PR 仍待 reviewer 复核。
 - **遗留问题**：Action 升级需新提交 CI 再验证；GHCR 的实际推送仍需合入 main 后验证。
+
+### LOG-mianyoubiaoqing-20261119-01
+
+- **时间**：2026-11-19 22:56（+08:00）
+- **工具/模型**：Antigravity / Orchestrator
+- **模块 / 分支 / PR**：M1 / `feat/m1-capture-extraction` / 待建（关联 [#6](https://github.com/Tarnishedtaffy/2026gdufai/issues/6)、[#21](https://github.com/Tarnishedtaffy/2026gdufai/issues/21)、[#24](https://github.com/Tarnishedtaffy/2026gdufai/issues/24)、PR [#13](https://github.com/Tarnishedtaffy/2026gdufai/pull/13)）
+- **任务**：同步上游最新提交，review 契约 v1.4（#21）与 PR #13 交接，并完成 M1 #6 多模态识别与字段抽取核心。
+- **关键提示词**：
+  - 拉取仓库远端最新提交，review #21 号 issue，再完成 M1 模块本人部分（#6）
+  - 人确认：在 #21 评论确认 M1 知悉（不代勾含 M3 的复选框）、在 PR #13 评论确认交接；一次完成 #6 后端核心并另提 contract-change issue；采用 OpenAI 兼容协议统一适配；本地提交暂不推送
+- **代理做了什么**：
+  - 同步本地 `main` 至 `upstream/main`（`e7180fe`）并切出功能分支 `feat/m1-capture-extraction`。
+  - 在 [#21](https://github.com/Tarnishedtaffy/2026gdufai/issues/21#issuecomment-7012527951) 评论确认 M1 识别端知悉契约 v1.4；在 PR [#13](https://github.com/Tarnishedtaffy/2026gdufai/pull/13#issuecomment-7012529049) 评论确认 `CaptureDraft` / `Partial<CaptureDraft>` 交接口径与文件防冲突边界；创建契约变更议题 [#24](https://github.com/Tarnishedtaffy/2026gdufai/issues/24) 提议新增 `POST /api/capture/uploads` 与 `POST /api/capture/extract` 及对应 §2.6 错误码。
+  - 新增 `backend/src/config/ai.ts` 并在 `backend/src/config/index.ts`、`.env.example`、`README.md` 同步新增 AI 环境变量说明；新增 [ADR-0002](docs/decisions/ADR-0002-m1-ai-provider-adapter.md)。
+  - 新增 M1 多模态识别与抽取核心：`backend/src/modules/capture/{types,normalizers,schema,storage,provider,extractor,index}.ts` 与版本化提示词 `prompts/{extract-text,extract-followup,extract-receipt}.ts`。
+  - 新增 5 组 stub 单元与真实 M2 联调测试：`backend/test/capture/{text-extraction,followup-extraction,multimodal-pipeline,openai-compatible-provider,m1-m2-handoff}.test.ts`（18 例）。
+- **决策**：
+  - 统一采用基于 Node 22 原生 `fetch` / `FormData` / `Blob` 的 OpenAI 兼容协议适配器，支持 `OCR_*` / `ASR_*` 未配置时自动回退至 `LLM_*`，不引入厂商专有依赖，不改动 `pnpm-lock.yaml`。
+  - 提示词初始版本分别为 `m1-text-v1`、`m1-followup-v1`、`m1-receipt-v1`（首次建立，无旧版本对比）；严格剥离模型夹带的身份、幂等键与 `originalTransactionId`，将 `0` 与「未知」等占位词规整为 `null`，并将日期/时间统一规范化为合法 `+08:00` 日历时间。
+  - 不修改 `backend/src/modules/ledger/`、`docs/contracts/` 或 PR #13 的 `capture/README.md`；对外上传/抽取路由待 #24 经契约组与前端确认后再挂载。
+- **验证**：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend test`（20 文件 100 项，含 M1 新增 5 文件 18 项）、`pnpm --filter frontend test`（2 文件 33 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 全部通过。
+- **人工审核**：方案、交付范围与 GitHub 回复策略已由人确认；本地提交待人复核后再推送与发起 PR。
+- **遗留问题**：本机暂无 `.env` 与真实 AI 密钥，真实第三方模型服务的人工联调验证待配置密钥后补记；`POST /api/capture/uploads` 与 `POST /api/capture/extract` 路由挂载与前端接入待 #24 与 PR #13 推进后跟进；游戏化与异常消费审计待后续开发。
+
+### LOG-mianyoubiaoqing-20261120-01
+
+- **时间**：2026-11-20 13:50（+08:00）
+- **工具/模型**：Antigravity / Orchestrator
+- **模块 / 分支 / PR**：M1 / `feat/m1-capture-extraction` / 待建（关联 [#6](https://github.com/Tarnishedtaffy/2026gdufai/issues/6)、[#24](https://github.com/Tarnishedtaffy/2026gdufai/issues/24)）
+- **任务**：rebase 至包含 #13 与 #17 的最新主干 `9d28ec4`，对齐 `@gduf/capture-flow` 与 #24 校验约束，使用本机环境变量中的真实 `DEEPSEEK_API_KEY` 完成真实 AI + M2 联调测试并提交 PR。
+- **关键提示词**：
+  - 使用环境变量中的 key 进行测试，并提交 PR
+- **代理做了什么**：
+  - 将 `feat/m1-capture-extraction` rebase 到 `upstream/main`（`9d28ec4`），合并解决 `README.md` 与 `backend/src/modules/capture/index.ts` 冲突（保留 `@gduf/capture-flow` 导出与全部鉴权文档），执行 `pnpm install --frozen-lockfile`。
+  - 统一 `backend/src/modules/capture/types.ts` 直接复用 `@gduf/capture-flow` 的 `CaptureDraft`，在 `normalizers.ts` 与 `extractor.ts` 新增 `ACTIVE_CONTRACT_FEEDBACK_CODES` 与 `validatePendingFeedbackHints`：调用 AI 前校验 `pendingFeedback`，拒绝未知或已废弃历史码并返回 `INVALID_CAPTURE_INPUT`。
+  - 在 `backend/src/config/ai.ts` 增加 `DEEPSEEK_API_KEY` 可选回退（未配置 `LLM_API_KEY` 时默认回退为 `https://api.deepseek.com/v1` + `deepseek-chat`），并同步 `.env.example`、`README.md` 与 [ADR-0002](docs/decisions/ADR-0002-m1-ai-provider-adapter.md)。
+  - 补充单元测试与 `@gduf/capture-flow` → `createCaptureExtractor` → 真实 M2 的闭环集成测试；在仓外临时脚本使用环境变量 `DEEPSEEK_API_KEY`（模型 `deepseek-chat`）执行 5 项真实 AI + M2 v1.4 内存 SQLite 联调。
+- **决策**：
+  - 本次仅提交配置、M1 抽取核心、ADR、测试与个人日志，不修改 `docs/contracts/`（待 #23 v1.5 冻结后再按 #24 推进 v1.6 契约与 HTTP 路由挂载）。
+  - 真实 API 联调通过仓外临时脚本执行，仓库内 `backend/test/capture/*.test.ts` 仍保持 100% stub 与零网络依赖，确保 CI 稳定与无密钥泄漏。
+- **验证**：
+  - 真实 `deepseek-chat` + `@gduf/capture-flow` + 真实 M2（v1.4）联调 5 项全部通过（不记录任何密钥内容）：
+    - 单笔中文口语与相对日期（1071ms）：`b_live_2` / `r_live_1` → `confirmed`（`tx_95569e57-3298-4a74-ae1a-d54a6af55dc7`，3250 分，`2026-11-19`）；
+    - 单句多笔拆分（1099ms）：`b_live_5` / `r_live_3`、`r_live_4` → 2 条均 `confirmed`；
+    - 缺金额/时间追问补丁（486ms + 516ms）：首轮 `b_live_7` / `r_live_6` `pending_followup`（`MISSING_AMOUNT`）→ 追问补丁 `{ amount: 18.5, occurredAt: "2026-11-20T12:30:00+08:00" }` 保留商户「学校食堂」→ `b_live_8` `confirmed`（1850 分）；
+    - v1.4 退款表述（845ms）：抽取正数 45 元并保留「退款」原文 → 首轮 `b_live_10` `MISSING_ORIGINAL_TRANSACTION` → 次轮 `b_live_11` `confirmed` 中性记录（`ORIGINAL_NOT_FOUND_RECORDED`）；
+    - 文本端点调用图像 Vision 边界（89ms）：显式返回 `AI_UPSTREAM_ERROR`（HTTP 400），不抛未捕获异常、不伪造草稿。
+  - 全仓静态与单测：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend test`（27 文件 205 项，含 M1 5 文件 20 项）、`pnpm --filter frontend test`（12 文件 73 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 全部通过。
+- **人工审核**：待团队 reviewer 审核本 PR；#24 契约增补待 v1.5 冻结后跟进。
+- **遗留问题**：本机当前仅配置了文本模型密钥 `DEEPSEEK_API_KEY`，多模态 Vision OCR 与 ASR 语音转写端点的真实服务验证待配置支持图像/音频的模型密钥后补记；`POST /api/capture/uploads` 与 `POST /api/capture/extract` 路由挂载与前端附件闭环待 #23/#24 冻结后推进。
+
+### LOG-mianyoubiaoqing-20261120-02
+
+- **时间**：2026-11-20 14:04（+08:00）
+- **工具/模型**：Antigravity / Orchestrator
+- **模块 / 分支 / PR**：M1 / `feat/m1-capture-extraction` / [#30](https://github.com/Tarnishedtaffy/2026gdufai/pull/30)
+- **任务**：依据 DeepSeek 官方 API 文档与实时模型列表接入 `deepseek-flash`、`/v1/tools/ocr` 与 `/v1/tools/asr`，完成文字、小票图片 OCR 与语音 ASR 三模态真实联调并更新 PR #30。
+- **关键提示词**：
+  - deepseek 的 api 有提供 ocr、asr 等服务，查阅相关文档，应该也可以使用
+- **代理做了什么**：
+  - 核对 DeepSeek 官方文档与 `GET /v1/models` 实时响应：确认当前多模态主模型 ID 为 `deepseek-flash`，并分别提供独立文档/图片 OCR 端点 `POST /v1/tools/ocr`（`purpose="text_recognition"` + `file` → `pages[].text`）与语音转写端点 `POST /v1/tools/asr`（`file`，支持 16-bit PCM WAV / Ogg Opus，≤ 8 MiB / 120s → `{ request_id, text, duration_ms }`）。
+  - 更新 `backend/src/config/ai.ts` 与 `backend/src/config/index.ts`：DeepSeek 默认模型调整为 `deepseek-flash`，新增 `OcrProtocol`（`openai-vision` / `deepseek-ocr`）与 `AsrProtocol`（`openai-asr` / `deepseek-asr`），按服务商域名自动判别并支持 `OCR_PROTOCOL` / `ASR_PROTOCOL` 显式覆盖；同步更新 `.env.example`、`README.md` 与 [ADR-0002](docs/decisions/ADR-0002-m1-ai-provider-adapter.md)。
+  - 新增 `backend/src/modules/capture/deepseek-tools.ts` 并在 `provider.ts` 接入双协议分派：`deepseek-ocr` 先识别票面文字（空白则直接判不可读，不再调用 LLM）再由 `deepseek-flash` 结构化为 `CaptureDraft`；`deepseek-asr` 直接调用 `/v1/tools/asr` 转写语音后进入统一文字抽取链。
+  - 在 `backend/test/capture/openai-compatible-provider.test.ts` 新增 `deepseek-ocr` / `deepseek-asr` 配置与 stub `fetch` 测试；在仓外临时脚本使用 `DEEPSEEK_API_KEY` 完成全 3 模态 8 项真实联调。
+- **决策**：
+  - 保留 `openai-vision` 与 `openai-asr` 兼容分支，仅在 DeepSeek 域名下默认切换至 `/v1/tools/ocr` 与 `/v1/tools/asr`，确保阿里百炼、硅基流动、OpenAI 等服务商仍可直接沿用既有配置。
+  - 空白小票 OCR 结果或 `deepseek-flash` 判定的无关字符噪点均通过 `UNREADABLE_RECEIPT` 结构化失败返回，不伪造草稿。
+- **验证**：
+  - 真实 `DEEPSEEK_API_KEY` 全模态端到端联调 8 项全部通过（含 `@gduf/capture-flow` 与真实 M2 v1.4 SQLite 落库）：
+    - 文字 4 项（`deepseek-flash`）：单笔中文口语（1257ms → `confirmed`）、单句多笔拆分（2054ms → 2 条 `confirmed`）、缺金额追问补丁（1823ms + 1051ms → `confirmed` 保留商户）、v1.4 退款文本（1330ms → `MISSING_ORIGINAL_TRANSACTION` → `ORIGINAL_NOT_FOUND_RECORDED`）；
+    - 小票图片 OCR 2 项（`/v1/tools/ocr` + `deepseek-flash`）：多金额 PNG 小票（`SUBTOTAL 58.00 / DISCOUNT -8.00 / PAID 50.00 RMB`，3799ms）准确抽取实付 `50` 元与受控 `sourceRef`，写入 SQLite `amount_cents=5000, source_modality='image'`；纯白空白 PNG（9077ms）判定 `UNREADABLE_RECEIPT` 不伪造草稿；
+    - 语音 ASR 2 项（`/v1/tools/asr` + `deepseek-flash`）：合成中文语音 WAV（`昨天下午打车去高铁站花了三十八块五`，2271ms）准确转写并抽取 `38.5` 元与受控 `sourceRef`，写入 SQLite `amount_cents=3850, source_modality='voice'`；1 秒静音 PCM WAV（171ms）返回 `EMPTY_TRANSCRIPT`。
+  - 全仓静态与单测：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend test`（27 文件 206 项）、`pnpm --filter frontend test`（12 文件 73 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 全部通过。
+- **人工审核**：PR [#30](https://github.com/Tarnishedtaffy/2026gdufai/pull/30) 已更新并提交，待 reviewer 审核。
+- **遗留问题**：`POST /api/capture/uploads` 与 `POST /api/capture/extract` 路由挂载及前端附件闭环待 #23（v1.5）冻结后按 #24 写入 v1.6 契约推进。
+
+### LOG-mianyoubiaoqing-20261120-03
+
+- **时间**：2026-11-20 15:17（+08:00）
+- **工具/模型**：Antigravity / Orchestrator
+- **模块 / 分支 / PR**：M1 / `feat/m1-capture-extraction` / [#30](https://github.com/Tarnishedtaffy/2026gdufai/pull/30)
+- **任务**：全面修复 PR #30 复审指出的 1 项 P1、2 项 P2 与 6 项 P3 问题，补齐回归测试并更新 PR 回复。
+- **关键提示词**：
+  - 读一下 PR 的 comment
+  - 开始吧（用户确认修复 PR #30 复审提出的 P1 + P2 + 全部 P3 问题）
+- **代理做了什么**：
+  - **P1 凭据防错发**：清空 `.env.example` 中的 `LLM_API_BASE_URL`、`LLM_MODEL`、`ASR_MODEL` 默认值（保留注释说明），并在 `backend/src/config/ai.ts` 为 `DEEPSEEK_API_KEY` 回退增加跨厂商拦截（回退密钥流向非 DeepSeek 地址时直接抛出配置错误）；补充基于真实 `.env.example` 解析的回归测试。
+  - **P2 反馈码与超时保护**：在 `normalizers.ts` 的 `ACTIVE_CONTRACT_FEEDBACK_CODES` 补全 `#23`（v1.5 §6）已冻结的 4 个反馈码（`ORIGINAL_TRANSACTION_AGED`、`PARTIAL_REPAYMENT_RECORDED`、`AMBIGUOUS_LOAN_PAYMENT`、`ORIGINAL_ALREADY_SETTLED`）；重写 `provider.ts` 为 `runRequestWithTimeout`，用统一 `AbortController` + `Promise.race` 覆盖响应头等待及 `response.json()`/`text()` 读取全生命周期，并补充响应体卡住回归测试。
+  - **全部 P3 收口**：`deepseek-tools.ts` 增加 WAV/Ogg Opus 与 ≤8 MiB 预检；`normalizers.ts` `normalizeOccurredAt` 保留输入毫秒精度；`ai.ts` 增加 `AI_TIMEOUT_MS <= 2_147_483_647` 上限；`extractor.ts` 语音路径在调用付费 ASR 前先校验 `referenceTime`；`schema.ts` 移除模型 `patch.rawText` 覆写分支、仅保留 `appendRawText` 追加；同步更新 PR #30 正文明确 `#24` 待冻结状态及内部失败码与 HTTP 错误码映射关系。
+- **决策**：
+  - 同时采用「模板留空 + 运行时跨厂商校验」双重防线，既满足复制 `.env.example` 后仅填 `DEEPSEEK_API_KEY` 的快捷体验，也杜绝显式改坏 URL 时把 DeepSeek Key 发往第三方。
+  - `ACTIVE_CONTRACT_FEEDBACK_CODES` 在本 PR 内直接补全 22 个现行码（v1.4 18 码 + `#23` v1.5 4 码），待 `@gduf/capture-flow` 后续统一注册表后再复用，确保 v1.5 合入后不阻断追问。
+- **验证**：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend exec vitest run`（27 文件 210 项，含 M1 #6 5 文件 25 项）、`pnpm --filter frontend exec vitest run`（12 文件 73 项）、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 与 LF/EOF 检查全部通过。
+- **人工审核**：PR #30 修复已推送并回复复审人 `@Tarnishedtaffy`，待复审通过。
+- **遗留问题**：`#24` 仍处于「有条件确认 / 待正文冻结」阶段，待 `#23`（v1.5）合并且 `#24` 补齐 §2.10/§2.6 确认后再挂载 `/api/capture/*` 路由并执行内部失败码到契约 HTTP 错误码的映射。
+
+### LOG-mianyoubiaoqing-20261120-04
+
+- **时间**：2026-11-20 16:02（+08:00）
+- **工具/模型**：Antigravity / Orchestrator
+- **模块 / 分支 / PR**：M1 / `feat/m1-capture-extraction` / [#30](https://github.com/Tarnishedtaffy/2026gdufai/pull/30)
+- **任务**：修复 PR #30 二轮复审及追加 P3（`@Tarnishedtaffy`、`@yukacezar569-blip`）指出的上传存储安全边界（P1/P2/P3）、DeepSeek ASR 时长预检与跨服务源密钥守卫。
+- **关键提示词**：
+  - 读一下 PR 的新 comment
+  - 读一下新 comment，然后一起修了吧
+- **代理做了什么**：
+  - **P1/P3 受控存储安全边界（`backend/src/modules/capture/storage.ts`）**：读写路径均先校验 `uploadDir` 与各层子目录 `YYYY`/`MM` 非符号链接且 `realpath` 严格位于 `realpath(uploadDir)` 内；`saveCaptureUpload` 取消跟随符号链接的 `mkdir(..., { recursive: true })`，改为逐级 `mkdir` + `lstat` + `realpath` 并以 `O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW` 独占创建常规文件（Windows `O_NOFOLLOW` 为 `undefined` 时安全回退为 `0` 且保留逐级 `lstat` + `realpath` 校验）；`readCaptureUpload` 改为先逐级 `lstat`/`realpath`，再以 `O_RDONLY | O_NOFOLLOW` 打开句柄，交叉校验 `handle.stat()` 与 `realpath` 的 `dev`/`ino`、拒绝 `nlink > 1` 多硬链接，并在读取前按图片 ≤ 10 MiB / 语音 ≤ 15 MiB 校验 `size`（防 TOCTOU 与大文件读入内存）。
+  - **P2 原型链继承键防护**：将 `storage.ts` 的 `MIME_SPECS`、`EXT_TO_MEDIA` 及 `deepseek-tools.ts` 的 `MIME_TO_IMAGE_EXT` 全部重构为 `Map`，彻底拒绝 `constructor`、`__proto__`、`toString` 等继承属性。
+  - **P3 ASR WAV 120s 预检与跨源密钥守卫**：在 `deepseek-tools.ts` 增加 RIFF/WAVE 头解析 `estimateWavDurationSeconds`，对超 120 秒 WAV 本地拦截并返回 `UPLOAD_TOO_LARGE`（Ogg Opus 时长约束同步记入 README/ADR-0002）；将 `backend/src/config/ai.ts` 的跨主机拦截推广到全部配置——`OCR_API_BASE_URL` / `ASR_API_BASE_URL` 与 `LLM_API_BASE_URL` 不同源（origin）且未独立配置密钥时直接抛错，防止非 DeepSeek 场景跨主机透传 `LLM_API_KEY`。
+  - **回归测试**：在 `backend/test/capture/multimodal-pipeline.test.ts` 与 `openai-compatible-provider.test.ts` 新增原型链 MIME 键拒绝、年/月两级父目录 symlink（Windows junction / POSIX dir）读写拒绝、多硬链接拒绝、读取超大文件拒绝、WAV > 120s 预检与非 DeepSeek 跨源 Key 拦截至 28 项 M1 #6 单元测试全部覆盖。
+- **决策**：
+  - `readCaptureUpload` 与 `saveCaptureUpload` 同时采用逐级 `lstat`/`realpath` 与 `fd.stat()` 节点比对，既消除 POSIX TOCTOU / hardlink / O_NOFOLLOW 风险，也保证跨平台（Windows + Linux 容器）一致生效。
+  - 仅在相同 `origin`（scheme + host + port）时允许 OCR/ASR 回退复用 `LLM_API_KEY`，协议降级或不同域名一律要求显式配置独立密钥。
+- **验证**：`pnpm -r typecheck`、`pnpm -r lint`、`pnpm --filter @gduf/backend exec vitest run`、`pnpm --filter frontend exec vitest run`、`VITE_USE_MOCK=false pnpm --filter frontend build`、`git diff --check` 与 LF/EOF 检查全部通过。
+- **人工审核**：PR #30 修复已推送并回复 `@Tarnishedtaffy` 与 `@yukacezar569-blip`，待复审通过。
+- **遗留问题**：`#24` 对外路由与完整上传识别闭环、Ogg Opus 路由层时长校验以及 `CaptureResult` 新增字段待 `#23`（v1.5）合并与后续 PR 推进。
