@@ -6,7 +6,7 @@
 
 | 功能 | 负责模块 | 状态 | 最近相关 PR |
 |---|---|---|---|
-| MVP-1 自然语言记账 + OCR 录入 | M1 | 进行中 | #13 |
+| MVP-1 自然语言记账 + OCR 录入 | M1 | 进行中（识别抽取核心已合入，对外路由待 #24） | #30 |
 | MVP-2 消费自动分类与统计 | M2 | 进行中（契约 v1.4） | #17 |
 | MVP-3 自然语言查账 | M3 | 未开始 | — |
 | MVP-4 预算设定与超支提醒 | M4（M2 组） | 未开始 | — |
@@ -43,3 +43,13 @@
 - **契约 / 术语影响**：契约 v1.4；新增 `entry_type`、`matched_transaction_id`、`originalTransactionId`、`matchedTransactionId`、`entryType`；新增 3 个 v1.4 反馈码；GLOSSARY 更新「退款」并新增「中性记录」。
 - **评审意见**：修改后通过。还款方向、`isEmpty` 筛选、超额退款误伤还款、契约流程与话术一致性均已修复，最终 APPROVED。
 - **后续事项**：#18 前端 `entryType` / mock / 原单选择；#22/#23 v1.5 贷款还款改为 2C、新增类别 13「贷款利息」。
+
+### #30 feat(m1): 实现多模态识别与字段抽取核心及 AI 适配 ADR
+
+- **合并时间**：2026-11-21
+- **作者 / 模块**：`mianyoubiaoqing` / M1
+- **关联日志**：LOG-mianyoubiaoqing-20261119-01、LOG-mianyoubiaoqing-20261120-01、LOG-mianyoubiaoqing-20261120-02、LOG-mianyoubiaoqing-20261120-03、LOG-mianyoubiaoqing-20261120-04
+- **改动摘要**：新增文本 / 语音 / 小票三模态识别与字段抽取核心、受控上传存储、OpenAI 兼容与 DeepSeek `/tools/ocr`、`/tools/asr` 双协议适配器及版本化提示词；输出对齐 `@gduf/capture-flow` 的 `CaptureDraft`，不改动 M2 入库。
+- **契约 / 术语影响**：未修改 `docs/contracts/`；新增 ADR-0002；对外 `/api/capture/uploads`、`/api/capture/extract` 路由待 #24 契约冻结。
+- **评审意见**：修改后通过。两轮 P1/P2/P3（凭据跨厂商拦截、反馈码补全、全生命周期超时、上传目录符号链接 / 硬链接 / TOCTOU 防护、ASR 预检）均已修复，最终 APPROVED。
+- **后续事项**：#24 契约冻结后挂载对外路由与失败码映射；Ogg Opus 时长校验待路由层；三模态真实密钥联调记录见个人日志。
