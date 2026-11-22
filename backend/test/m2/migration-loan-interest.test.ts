@@ -259,6 +259,40 @@ describe('迁移 003：贷款利息类别', () => {
     db.close();
   });
 
+  it('连续后缀被占用时自动找到下一个可用后缀，迁移不回滚', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'm2-migration-suffix-deep-'));
+    dirs.push(dir);
+    const path = join(dir, 'legacy.db');
+
+    const raw = openLegacy(path);
+    insertUser(raw);
+    insertCategory(raw, 30, '贷款利息');
+    insertCategory(raw, 31, '贷款利息(旧)');
+    insertCategory(raw, 32, '贷款利息(旧2)');
+    insertCategory(raw, 33, '贷款利息(旧3)');
+    insertCategory(raw, 34, '贷款利息(旧4)');
+    raw.close();
+
+    const db = openDatabase(path);
+    const preset = db.prepare('SELECT name, is_preset FROM categories WHERE id = 13').get() as {
+      name: string;
+      is_preset: number;
+    };
+    expect(preset).toEqual({ name: '贷款利息', is_preset: 1 });
+
+    const renamed = db.prepare('SELECT id, name FROM categories WHERE id = 30').get() as {
+      id: number;
+      name: string;
+    };
+    expect(renamed).toEqual({ id: 30, name: '贷款利息(旧5)' });
+
+    const untouched = db.prepare('SELECT name FROM categories WHERE id = 34').get() as {
+      name: string;
+    };
+    expect(untouched).toEqual({ name: '贷款利息(旧4)' });
+    db.close();
+  });
+
   it('旧库自定义 13 与同名自定义 14 同时存在时，先重命名再整体迁移', () => {
     const dir = mkdtempSync(join(tmpdir(), 'm2-migration-mixed-'));
     dirs.push(dir);

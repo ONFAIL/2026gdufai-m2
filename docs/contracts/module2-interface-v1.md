@@ -484,7 +484,8 @@ POST /api/transactions/tx_xxx/void
 规则：
 
 - 仅 `status='confirmed'` 的账单可修改；已作废账单返回 `422 INVALID_QUERY_PARAM`（`field: status`）；
-- 中性记录（`entry_type != 'normal'`）不允许 PATCH；作废中性 `repayment` 时必须重算原贷款 `settled_at`，并同时作废 `${idempotencyKey}#interest` 记录；
+- 中性记录（`entry_type != 'normal'`）不允许 PATCH，返回 `422 INVALID_QUERY_PARAM`（`field: entryType`）；中性 `repayment` 的 void 在 PR-C 落地前同样返回 `422 INVALID_QUERY_PARAM`（`field: entryType`），PR-C 落地后必须重算原贷款 `settled_at`，并同时作废 `${idempotencyKey}#interest` 记录；
+- 校验顺序：先判 `entry_type`，再判 `status`；两者同时命中时返回 `field: entryType`；
 - 作废原贷款：关联还款与利息记录保留，但不再参与剩余本金计算；
 - `void` 幂等：重复调用返回 `200` 与当前 `status='void'`，不重复写入学习规则；
 - 修改分类时写入 `user_category_rules`（下次同商户自动命中）；改到另一侧 `kind` 时翻转 `direction` 并重算当月预算；作废后该账单从统计与预算中排除，但记录保留。
