@@ -54,11 +54,22 @@ async function createCategory(name: string, kind: 'expense' | 'income' = 'expens
 }
 
 describe('类别 CRUD', () => {
-  it('创建自定义类别，ID 从 13 起自增', async () => {
+  it('创建自定义类别，ID 从 14 起自增', async () => {
     const result = await createCategory('宠物');
     expect(result.status).toBe(201);
     expect(result.body).toMatchObject({ name: '宠物', kind: 'expense', isPreset: false, isActive: true });
-    expect((result.body as { id: number }).id).toBeGreaterThanOrEqual(13);
+    expect((result.body as { id: number }).id).toBe(14);
+  });
+
+  it('PATCH 空对象或数组请求体返回 422', async () => {
+    const created = await createCategory('空更新');
+    const id = (created.body as { id: number }).id;
+
+    const empty = await request('PATCH', `/api/categories/${id}`, {});
+    expect(empty.status).toBe(422);
+
+    const array = await app.inject({ method: 'PATCH', url: `/api/categories/${id}`, payload: [] });
+    expect(array.statusCode).toBe(422);
   });
 
   it('同 kind 下重名返回 409', async () => {

@@ -169,7 +169,7 @@ describe('响应形状', () => {
   });
   it('账单 filter 与 item 字段', () => {
     const r = mockListTransactions({ categoryId: null, from: null, to: null, direction: null });
-    expect(Object.keys(r.filter).sort()).toEqual(['categoryId','direction','from','to'].sort());
+    expect(Object.keys(r.filter).sort()).toEqual(['categoryId','direction','entryType','from','to'].sort());
     expect(Object.keys(r.items[0])).toContain('occurredDate');
     expect(Object.keys(r.items[0])).toContain('sourceModality');
     expect(Object.keys(r.items[0])).toContain('anomalyFlag');

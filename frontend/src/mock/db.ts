@@ -46,7 +46,7 @@ export function mockListTransactions(query: TransactionQuery): TransactionListRe
   let totalIncomeCents = 0;
 
   for (const tx of storeTransactions) {
-    if (query.categoryId !== null && query.categoryId !== undefined && tx.category.id !== query.categoryId) {
+    if (query.categoryId !== null && query.categoryId !== undefined && tx.category?.id !== query.categoryId) {
       continue;
     }
     if (query.direction && tx.direction !== query.direction) {
@@ -77,10 +77,11 @@ export function mockListTransactions(query: TransactionQuery): TransactionListRe
       from: query.from ?? null,
       to: query.to ?? null,
       direction: query.direction ?? null,
+      entryType: query.entryType ?? 'normal',
     },
     summary: {
-      totalExpenseCents,
-      totalIncomeCents,
+      expenseCents: totalExpenseCents,
+      incomeCents: totalIncomeCents,
       count: filtered.length,
     },
     items,
@@ -90,7 +91,7 @@ export function mockListTransactions(query: TransactionQuery): TransactionListRe
       nextCursor: hasMore ? String(nextIdx) : null,
     },
     meta: {
-      timezone: 'Asia/Shanghai',
+      unit: 'cent',
       isEmpty: filtered.length === 0,
     },
   };

@@ -145,6 +145,19 @@ export interface UpdateCategoryInput {
 }
 
 export function updateCategory(db: Db, id: number, input: UpdateCategoryInput): CategoryRecord {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    invalid('请求体必须是包含可更新字段的对象', 'body');
+  }
+  const keys = Object.keys(input);
+  if (keys.length === 0) {
+    invalid('至少需要提供一个可更新字段', 'body');
+  }
+  const unknown = keys.filter(
+    (key) => !['name', 'kind', 'color', 'icon', 'keywords', 'sortOrder', 'isActive'].includes(key)
+  );
+  if (unknown.length > 0) {
+    invalid(`不支持的字段: ${unknown.join(', ')}`, 'body');
+  }
   const current = findCategory(db, id);
   if (current === null) {
     throw categoryNotFound(id);
@@ -217,14 +230,14 @@ export function deleteCategory(db: Db, id: number): void {
       field: 'categoryId'
     });
   }
-  const counts = countReferenced(db, id);
-  if (counts.transactions > 0 || counts.budgets > 0 || counts.rules > 0) {
-    throw new AppError('CATEGORY_IN_USE', 409, '该类别仍有引用，不能删除', {
-      field: 'categoryId',
-      details: { counts }
-    });
-  }
   db.transaction(() => {
+    const counts = countReferenced(db, id);
+    if (counts.transactions > 0 || counts.budgets > 0 || counts.rules > 0) {
+      throw new AppError('CATEGORY_IN_USE', 409, '该类别仍有引用，不能删除', {
+        field: 'categoryId',
+        details: { counts }
+      });
+    }
     db.prepare('DELETE FROM user_category_rules WHERE category_id = ?').run(id);
     db.prepare('DELETE FROM categories WHERE id = ?').run(id);
   })();

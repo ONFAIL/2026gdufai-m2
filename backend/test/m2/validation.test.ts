@@ -123,4 +123,102 @@ describe('parseBatch', () => {
     const result = parseBatch({ ...baseBatch, records });
     expect(result).toMatchObject({ ok: false, field: 'records' });
   });
+
+  it('普通消费携带还款拆分子段拒收', () => {
+    const result = parseBatch(withRecord({ principalCents: 1000 }));
+    expect(result).toMatchObject({ ok: false, field: 'records[0].principalCents' });
+  });
+
+  it('退款携带还款拆分子段拒收', () => {
+    const result = parseBatch(
+      withRecord({ rawText: '退款 32.5', principalCents: 3250, repaymentPart: 'principal' })
+    );
+    expect(result).toMatchObject({ ok: false, field: 'records[0].principalCents' });
+  });
+
+  it('repaymentPart 非法拒收', () => {
+    const result = parseBatch(withRecord({ rawText: '还款 32.5', repaymentPart: 'fee' }));
+    expect(result).toMatchObject({ ok: false, field: 'records[0].repaymentPart' });
+  });
+
+  it('principalCents 非整数或为负拒收', () => {
+    expect(parseBatch(withRecord({ rawText: '还款 32.5', principalCents: 1.5 }))).toMatchObject({
+      ok: false,
+      field: 'records[0].principalCents'
+    });
+    expect(parseBatch(withRecord({ rawText: '还款 32.5', principalCents: -1 }))).toMatchObject({
+      ok: false,
+      field: 'records[0].principalCents'
+    });
+  });
+
+  it('mixed 缺 amount 拒收', () => {
+    const result = parseBatch(
+      withRecord({
+        rawText: '还款 32.5',
+        amount: null,
+        repaymentPart: 'mixed',
+        principalCents: 3000,
+        interestCents: 250
+      })
+    );
+    expect(result).toMatchObject({ ok: false, field: 'records[0].amount' });
+  });
+
+  it('mixed 本金与利息之和不等于 amount 拒收', () => {
+    const result = parseBatch(
+      withRecord({
+        rawText: '还款 32.5',
+        repaymentPart: 'mixed',
+        principalCents: 3000,
+        interestCents: 200
+      })
+    );
+    expect(result).toMatchObject({ ok: false, field: 'records[0].principalCents' });
+  });
+
+  it('只给一个分字段时 amount 必须等于该字段', () => {
+    expect(
+      parseBatch(withRecord({ rawText: '还款 32.5', principalCents: 3000 }))
+    ).toMatchObject({ ok: false, field: 'records[0].principalCents' });
+    expect(
+      parseBatch(withRecord({ rawText: '还款 32.5', interestCents: 3000 }))
+    ).toMatchObject({ ok: false, field: 'records[0].interestCents' });
+  });
+
+  it('principal 与 interest 互斥', () => {
+    expect(
+      parseBatch(
+        withRecord({ rawText: '还款 32.5', repaymentPart: 'principal', principalCents: 3250, interestCents: 250 })
+      )
+    ).toMatchObject({ ok: false, field: 'records[0].interestCents' });
+    expect(
+      parseBatch(
+        withRecord({ rawText: '还款 32.5', repaymentPart: 'interest', principalCents: 3000, interestCents: 3250 })
+      )
+    ).toMatchObject({ ok: false, field: 'records[0].principalCents' });
+  });
+
+  it('合法的 mixed 与纯利息通过', () => {
+    expect(
+      parseBatch(
+        withRecord({
+          rawText: '还款 32.5',
+          repaymentPart: 'mixed',
+          principalCents: 3000,
+          interestCents: 250
+        })
+      ).ok
+    ).toBe(true);
+    expect(
+      parseBatch(
+        withRecord({
+          rawText: '还款 32.5',
+          repaymentPart: 'interest',
+          interestCents: 3250
+        })
+      ).ok
+    ).toBe(true);
+    expect(parseBatch(withRecord({ rawText: '还款 32.5', principalCents: 3250 })).ok).toBe(true);
+  });
 });

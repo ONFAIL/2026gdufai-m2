@@ -74,3 +74,22 @@
 - **人工审核**：待审核
 - **遗留问题**：PR 仍为 CHANGES_REQUESTED，等作者确认；中性还款撤销需 PR-C 实现；不合并、不删分支
 
+### LOG-Tarnishedtaffy-20261122-01
+
+- **时间**：2026-11-22 18:35（+08:00）
+- **工具/模型**：Trae / DeepSeek-V4.1-Flash
+- **模块 / 分支 / PR**：M2 + 前端 / `feat/m2-v1.5-repayment-refund` / 待建
+- **任务**：实现契约 v1.5 的退款与贷款还款口径，并修复全量审查发现的问题
+- **关键提示词**：「把全部代码都审查一遍，找一下有没有 bug」「直接修复吧」「再审查一遍 汇报仓库当前状态 如果可以就放GitHub上去」
+- **代理做了什么**：
+  - `backend/src/modules/ledger/intake.ts`：退款改为显式原单匹配（取消 30 天窗口）；还款保留原单并写 `settled_at`，支持本金/利息拆分、`PARTIAL_REPAYMENT_RECORDED`、`AMBIGUOUS_LOAN_PAYMENT`、`ORIGINAL_ALREADY_SETTLED`、`ORIGINAL_TRANSACTION_AGED`；利息写入 `${idempotencyKey}#interest` 的类别 13 普通支出
+  - `backend/src/modules/ledger/{types,validation,repository}.ts`：新增 `repaymentPart` / `principalCents` / `interestCents` 与契约 §1.3 校验；落库 `principal_cents`、`settled_at`；累计已还本金与结清标记
+  - `backend/src/{app,shared/money}.ts`：4xx 错误不再泄漏 Fastify 内部码；金额换算增加安全整数边界
+  - `backend/src/modules/ledger/{categories,transaction-edit,transactions}.ts`：PATCH 空对象/未知字段 422、删除类别计数与删除同事务、真实日历日期校验、`meta.isEmpty` 计入中性记录
+  - 前端：`stats` 支出/净收支拆分请求、`entryType`/`settledAt`/`summary` 字段对齐、204 空响应、空类别安全展示、预算月份改用当前月
+  - 测试：`import.test.ts` 重写/新增 v1.5 还款、混息、纯利息、已结清、超 365 天、显式本金超额用例；`validation.test.ts` 补拆分子段校验；同步更新既有回归用例
+- **决策**：退款保持 v1.4 三态；还款改为保留原贷款 + `settled_at`；本金/利息拆分按契约严格校验，普通记录或退款携带拆分子段整批 `INVALID_BATCH`；利息记录不参与剩余本金与结清；已结清与不存在/已作废必须区分
+- **验证**：`backend` typecheck / eslint 通过，Vitest 307 项全绿；`frontend` vue-tsc 通过，Vitest 75 项全绿；`packages/capture-flow` typecheck / eslint 通过
+- **人工审核**：待审核
+- **遗留问题**：M1 尚无回传 `originalTransactionId` 的通道；前端类别 CRUD 与账单 PATCH/void 无 UI；#35 仍为 Draft（等 #24 冻结、音频魔数、反馈码对齐）；中性还款作废与利息撤销留给 PR-C
+
