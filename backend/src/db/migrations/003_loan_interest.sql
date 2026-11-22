@@ -18,26 +18,31 @@ SELECT CASE
 END AS new_id;
 
 -- 同名自定义类别先把名字让出来（与 id 无关，UNIQUE(kind, name) 才是冲突源）。
--- 若目标名字已被占用，依次尝试下一级后缀，避免重名撞 UNIQUE(kind, name) 导致整个迁移回滚。
-UPDATE categories
-   SET name = '贷款利息(旧)'
- WHERE is_preset = 0 AND kind = 'expense' AND name = '贷款利息'
-   AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.kind = 'expense' AND c.name = '贷款利息(旧)');
+-- 从 (旧)、(旧2)、(旧3)……中选第一个未被占用的后缀；候选上限 1000，
+-- 避免固定后缀数量不足时撞 UNIQUE(kind, name) 导致整个迁移回滚。
+CREATE TEMP TABLE _preset13_rename AS
+WITH RECURSIVE candidate_names(level, candidate_name) AS (
+  SELECT 1, '贷款利息(旧)'
+  UNION ALL
+  SELECT level + 1, '贷款利息(旧' || (level + 1) || ')'
+    FROM candidate_names
+   WHERE level < 1000
+)
+SELECT candidate_name
+  FROM candidate_names
+ WHERE NOT EXISTS (
+   SELECT 1 FROM categories c
+    WHERE c.kind = 'expense' AND c.name = candidate_names.candidate_name
+ )
+ ORDER BY level
+ LIMIT 1;
 
 UPDATE categories
-   SET name = '贷款利息(旧2)'
+   SET name = (SELECT candidate_name FROM _preset13_rename)
  WHERE is_preset = 0 AND kind = 'expense' AND name = '贷款利息'
-   AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.kind = 'expense' AND c.name = '贷款利息(旧2)');
+   AND EXISTS (SELECT 1 FROM _preset13_rename);
 
-UPDATE categories
-   SET name = '贷款利息(旧3)'
- WHERE is_preset = 0 AND kind = 'expense' AND name = '贷款利息'
-   AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.kind = 'expense' AND c.name = '贷款利息(旧3)');
-
-UPDATE categories
-   SET name = '贷款利息(旧4)'
- WHERE is_preset = 0 AND kind = 'expense' AND name = '贷款利息'
-   AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.kind = 'expense' AND c.name = '贷款利息(旧4)');
+DROP TABLE _preset13_rename;
 
 UPDATE categories
    SET id = (SELECT new_id FROM _preset13_migration)

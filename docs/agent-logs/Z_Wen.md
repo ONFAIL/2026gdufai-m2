@@ -554,3 +554,20 @@
 - **验证**：backend 23 文件 **187 例**通过；`git diff --check` 无输出
 - **人工审核**：待新 PR 复审
 - **遗留问题**：PR-B / PR-C 未做
+
+### LOG-Z_Wen-20261122-01
+
+- **时间**：2026-11-22 16:45（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-loan-interest-a` / #32
+- **任务**：补齐 #32 的 §2.9 过渡口径与迁移后缀边界，消除与 #33 的合并阻塞
+- **关键提示词**：用户「把#32补完整」；reviewer 指出 §2.9 要求「作废中性 repayment 必须重算」与 #33「PR-C 承载」冲突，且迁移只覆盖到 `(旧4)`
+- **代理做了什么**：
+  - 契约 §2.9 改为：中性记录 PATCH 返回 `422 INVALID_QUERY_PARAM`（`field: entryType`）；中性 `repayment` 的 void 在 PR-C 前同样返回 `422`（`field: entryType`），PR-C 后重算 `settled_at` 并作废 `${idempotencyKey}#interest`
+  - 补「先判 `entry_type`、再判 `status`，同时命中返回 `entryType`」的校验顺序
+  - 迁移 003 用递归 CTE + 临时表动态选择 `(旧)`、`(旧2)`……首个空闲后缀，替换四段固定 `UPDATE`；候选上限 1000
+  - 迁移测试新增「`(旧)` 到 `(旧4)` 全被占用 → 自动改用 `(旧5)`」
+- **决策**：采用「PR-C 前 422、PR-C 后重算」的过渡口径，既保留 PR-A 已定的最终行为，又不与 #33 当前实现互斥；动态后缀避免固定数量上限导致迁移回滚；未改动 #31/#33 分支
+- **验证**：backend `typecheck` / `lint` 通过；`test` 23 文件 **193 例**通过（迁移 8 例）；`git diff --check` 无输出
+- **人工审核**：待 #32 复审
+- **遗留问题**：#33 rebase 时需同步 §2.9 与 PATCH 顺序并补测试；#31 等 #32 合并后改测试标题/PR 描述并补 P3 用例
