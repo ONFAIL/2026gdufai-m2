@@ -343,20 +343,7 @@
 - **任务**：修复退款 PR 的 2 个 P1 与若干 P2 口径问题
 - **关键提示词**：reviewer 指出日志残留冲突标记、未匹配仍写 `matchedTransactionId`、summary 口径、entryType 取值、退款默认方向与追问码等
 - **代理做了什么**：
-  - 删除 `Z_Wen.md` 残留 `<<<<<<< HEAD` 与文件末尾空行
-  - `insertNeutral` 改为显式接收 `matchedTransactionId`：仅匹配分支传原单 id，未匹配兜底传 `null`
-  - 未匹配时的默认方向按类型：退款 → income「其他收入」，还款 → expense「其他」
-  - 「带 id 但未匹配」首轮改用新反馈码 `ORIGINAL_NOT_FOUND`；首轮 pending 同时返回 `timeFeedback`
-  - duplicate 回放从账单行读取 `matchedTransactionId`；`TransactionView` 增加该字段
-  - 中性记录按是否默认时间写 `time_source` / `chat_at`
-  - `getTransactionById` 排除 `status='void'`
-  - 契约：§1.4 补 `matchedTransactionId` 说明；§1.5 增 `ORIGINAL_NOT_FOUND`；§2.3 明确 `summary` 恒只统计 normal、`entryType` 四个取值；§4 退款用例勾选
-  - 测试：新增「无效 id 首轮 ORIGINAL_NOT_FOUND、次轮兜底且 matched 为 null」，覆盖 30 天用例的次轮
-- **决策**：`matchedTransactionId` 只表示「真匹配」；兜底记录一律 `null`
-- **验证**：`typecheck` / `lint` / `test` 全绿；`git diff --check` 无输出
-- **人工审核**：待复审
-- **遗留问题**：前端 mock/`contract.ts` 反馈码需同步，建议新开 issue 跟踪
-### LOG-Z_Wen-20261118-14
+  - 删除 `Z_Wen.md` 残留 `### LOG-Z_Wen-20261118-14
 
 - **时间**：2026-11-18 23:15（+08:00）
 - **工具/模型**：DeepSeek Harness / deepseek-flash
@@ -376,6 +363,7 @@
 - **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **91 例**；git diff --check 无输出
 - **人工审核**：待复审
 - **遗留问题**：前端同步由 #18 跟踪；退款金额超过原单的告警与中性记录唯一冲突自愈未做（P3）
+
 ### LOG-Z_Wen-20261119-01
 
 - **时间**：2026-11-19 12:05（+08:00）
@@ -392,6 +380,7 @@
 - **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **94 例**；git diff --check 无输出
 - **人工审核**：待复审
 - **遗留问题**：退款金额超原单告警、中性记录唯一冲突自愈未实现，需另开 issue
+
 ### LOG-Z_Wen-20261119-02
 
 - **时间**：2026-11-19 12:15（+08:00）
@@ -410,6 +399,7 @@
 - **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **96 例**；git diff --check 无输出
 - **人工审核**：待复审
 - **遗留问题**：新增 2 个反馈码需在 contract-change issue 登记（#16 或新开）
+
 ### LOG-Z_Wen-20261119-03
 
 - **时间**：2026-11-19 12:25（+08:00）
@@ -419,13 +409,15 @@
 - **关键提示词**：「退款>原账单，不能入库」
 - **代理做了什么**：
   - handleSpecialEntry：退款/还款金额大于原账单时返回 pending_followup + blocking REFUND_EXCEEDS_ORIGINAL，不写账单；
-  - 重发仍超则按轮次转 ejected；
+  - 重发仍超则按轮次转 
+ejected；
   - 契约 §1.5 严重度改 blocking、§3 口径与 §4 用例同步；
   - 测试改为「首轮 pending、次轮 pending、第三次 rejected，账单数不变」。
 - **决策**：超额退款一律不入库，避免污染收支
 - **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **96 例**；git diff --check 无输出
 - **人工审核**：待复审
 - **遗留问题**：7 个反馈码需在 contract-change issue 登记
+
 ### LOG-Z_Wen-20261119-04
 
 - **时间**：2026-11-19 15:55（+08:00）
@@ -445,6 +437,7 @@
 - **验证**：	ypecheck / lint / 	est 全绿，backend 15 文件 **98 例**；git diff --check 无输出
 - **人工审核**：待复审
 - **遗留问题**：v1.4 属语义变更，需新开 contract-change issue 或更新 #16
+
 ### LOG-Z_Wen-20261119-05
 
 - **时间**：2026-11-19 16:05（+08:00）
@@ -459,6 +452,24 @@
 - **验证**：git diff --check 无输出；仅文档变更
 - **人工审核**：待复审
 - **遗留问题**：无
+
+### LOG-Z_Wen-20261119-06
+
+- **时间**：2026-11-19 16:40（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-categories-crud` / 待建
+- **任务**：实现契约 §2.7 类别管理（创建 / 修改 / 删除 / 迁移）
+- **关键提示词**：用户要求开始 M2 剩余部分，等 #17 合并后再 rebase
+- **代理做了什么**：
+  - 新增 `modules/ledger/categories.ts`：创建、更新、删除、引用计数、reassign 事务
+  - `routes.ts` 注册 4 个路由；错误码复用 §2.6 已登记项
+  - 规则：同 kind 重名 409；预设删除 403；删除有引用 409 + counts（含 void 账单）；reassign 校验目标存在/启用/方向/预算冲突，单事务迁移账单、预算、规则
+  - 新增 `categories-crud.test.ts` 11 例
+- **决策**：reassign 规则冲突保留目标并合并 hit_count；预算冲突显式 409 不静默合并
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 16 文件 **93 例**
+- **人工审核**：待开 PR
+- **遗留问题**：等 #17 合并后 rebase；账单纠错（§2.9）未开始
+
 ### LOG-Z_Wen-20261119-07
 
 - **时间**：2026-11-19 17:05（+08:00）
@@ -475,6 +486,7 @@
 - **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **102 例**
 - **人工审核**：待复审
 - **遗留问题**：PR 描述 diff 数字需按实际更新；#18 需补 v1.4 清单；#21 需勾选受影响方
+
 ### LOG-Z_Wen-20261119-09
 
 - **时间**：2026-11-19 21:10（+08:00）
@@ -492,6 +504,7 @@
 - **验证**：`typecheck` / `lint` / `test` 全绿，backend 16 文件 **103 例**
 - **人工审核**：待开 PR
 - **遗留问题**：PR-B（纯利息旁路）与 PR-C（1D/2C）未做；等 #17 合并后 rebase
+
 ### LOG-Z_Wen-20261119-10
 
 - **时间**：2026-11-19 22:50（+08:00）
@@ -508,6 +521,7 @@
 - **验证**：`typecheck` / `lint` / `test` 全绿，backend 16 文件 **104 例**
 - **人工审核**：待开 PR
 - **遗留问题**：PR-B / PR-C 未做；等 #17 合并后 rebase
+
 ### LOG-Z_Wen-20261120-01
 
 - **时间**：2026-11-20 00:20（+08:00）
@@ -522,6 +536,7 @@
 - **验证**：`pnpm -r typecheck` / `lint` / `test` / `build` 全绿（frontend 73 例、backend 187 例）
 - **人工审核**：待 CI 重跑
 - **遗留问题**：前端类别 13 / mock / `settledAt` 等仍在 #18
+
 ### LOG-Z_Wen-20261120-02
 
 - **时间**：2026-11-20 14:00（+08:00）
@@ -539,6 +554,7 @@
 - **验证**：`pnpm -r typecheck / lint / test / build` 全绿（frontend 73 例、backend 187 例）
 - **人工审核**：待开 PR 并重跑 CI
 - **遗留问题**：PR-B / PR-C 未做
+
 ### LOG-Z_Wen-20261120-03
 
 - **时间**：2026-11-20 14:30（+08:00）
@@ -554,6 +570,22 @@
 - **验证**：backend 23 文件 **187 例**通过；`git diff --check` 无输出
 - **人工审核**：待新 PR 复审
 - **遗留问题**：PR-B / PR-C 未做
+
+### LOG-Z_Wen-20261120-04
+
+- **时间**：2026-11-20 14:35（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-categories-crud` / #25
+- **任务**：按 #25 Review 收紧预设类别权限
+- **关键提示词**：reviewer 指出预设类别可被 PATCH 改名/颜色/关键词，违反契约「只能停用」
+- **代理做了什么**：
+  - `updateCategory`：预设类别仅允许 `isActive`，其他字段传入返回 `403 CATEGORY_PRESET_PROTECTED`
+  - `icon` 改为类型校验，非字符串返回 422
+  - 测试：预设改名/改色 403、停用 200、icon 对象 422
+- **决策**：按契约收紧，不允许编辑预设
+- **验证**：backend 23 文件 **198 例**通过
+- **人工审核**：待新 PR 复审
+- **遗留问题**：等 #27 合并后把自定义 ID 断言改为 14
 
 ### LOG-Z_Wen-20261122-01
 
