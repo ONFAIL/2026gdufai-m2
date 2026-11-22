@@ -2,13 +2,13 @@
 import { onMounted, ref } from 'vue';
 import { getBudgets } from '../api/index';
 import type { BudgetItem } from '../types/contract';
-import { DEMO_TODAY } from '../mock/data';
+import { nowIso } from '../utils/datetime';
 import AmountText from '../components/AmountText.vue';
 import EmptyState from '../components/EmptyState.vue';
 import LevelBadge from '../components/LevelBadge.vue';
 import LoadingSkeleton from '../components/LoadingSkeleton.vue';
 
-const month = ref(DEMO_TODAY.slice(0, 7));
+const month = ref(nowIso().slice(0, 7));
 const budgets = ref<BudgetItem[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);

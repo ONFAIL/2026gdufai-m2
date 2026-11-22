@@ -67,6 +67,50 @@ describe('PATCH /api/transactions/:id', () => {
     expect(row.amount_cents).toBe(5000);
   });
 
+  it('改到同侧类别保留 direction_source，只把 category_source 记为 manual', async () => {
+    const id = insertTransaction(1);
+    const target = db
+      .prepare("SELECT id FROM categories WHERE kind = 'expense' AND id <> 1 ORDER BY id LIMIT 1")
+      .get() as { id: number };
+    const result = await patch(id, { categoryId: target.id });
+    expect(result.status).toBe(200);
+    const row = db
+      .prepare('SELECT category_id, direction, direction_source, category_source FROM transactions WHERE id = ?')
+      .get(id) as { category_id: number; direction: string; direction_source: string; category_source: string };
+    expect(row).toEqual({
+      category_id: target.id,
+      direction: 'expense',
+      direction_source: 'explicit',
+      category_source: 'manual'
+    });
+  });
+
+  it('未知字段直接 422，不产生部分更新', async () => {
+    const id = insertTransaction();
+    const result = await patch(id, { amountCents: 2000, status: 'void' });
+    expect(result.status).toBe(422);
+    const row = db.prepare('SELECT amount_cents, status FROM transactions WHERE id = ?').get(id) as {
+      amount_cents: number;
+      status: string;
+    };
+    expect(row).toEqual({ amount_cents: 3250, status: 'confirmed' });
+  });
+
+  it('重发相同 occurredAt 不清空 chat_at 和 time_source', async () => {
+    const id = insertTransaction();
+    db.prepare("UPDATE transactions SET chat_at = ?, time_source = 'chat_time' WHERE id = ?").run(
+      '2026-11-14T12:01:00+08:00',
+      id
+    );
+    const result = await patch(id, { occurredAt: '2026-11-14T12:00:00+08:00' });
+    expect(result.status).toBe(200);
+    const row = db.prepare('SELECT chat_at, time_source FROM transactions WHERE id = ?').get(id) as {
+      chat_at: string | null;
+      time_source: string;
+    };
+    expect(row).toEqual({ chat_at: '2026-11-14T12:01:00+08:00', time_source: 'chat_time' });
+  });
+
   it('改到另一侧类别时翻转 direction 并写学习规则', async () => {
     const id = insertTransaction(1);
     const result = await patch(id, { categoryId: 9 });

@@ -62,9 +62,9 @@ UPDATE user_category_rules
 
 INSERT INTO categories
   (id, name, kind, keywords, color, icon, sort_order, is_preset, is_active, created_at)
-VALUES
-  (13, '贷款利息', 'expense',
-   '["贷款利息","借款利息","房贷利息","还款利息","利息支出","分期利息","还利息","付利息","还息"]',
-   '#14B8A6', '🧾', 13, 1, 1, '2026-11-19T00:00:00+08:00');
+SELECT 13, '贷款利息', 'expense',
+       '["贷款利息","借款利息","房贷利息","还款利息","利息支出","分期利息","还利息","付利息","还息"]',
+       '#14B8A6', '🧾', 13, 1, 1, '2026-11-19T00:00:00+08:00'
+ WHERE NOT EXISTS (SELECT 1 FROM categories WHERE id = 13);
 
 DROP TABLE _preset13_migration;

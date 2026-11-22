@@ -77,6 +77,12 @@ function assertEditableBody(input: unknown): asserts input is PatchTransactionIn
   if (!EDITABLE_FIELDS.some((field) => field in (input as Record<string, unknown>))) {
     invalid('至少需要提供 categoryId / amountCents / merchant / occurredAt 之一', 'body');
   }
+  const unknown = Object.keys(input as Record<string, unknown>).filter(
+    (field) => !(EDITABLE_FIELDS as readonly string[]).includes(field)
+  );
+  if (unknown.length > 0) {
+    invalid(`不支持的字段: ${unknown.join(', ')}`, 'body');
+  }
 }
 
 export interface PatchedTransaction {
@@ -114,6 +120,7 @@ export function patchTransaction(
   let merchant = current.merchant;
   let occurredAt = current.occurred_at;
   let changedCategory = false;
+  let changedOccurredAt = false;
 
   if (input.categoryId !== undefined) {
     if (!Number.isInteger(input.categoryId) || (input.categoryId as number) <= 0) {
@@ -155,6 +162,7 @@ export function patchTransaction(
     if (typeof input.occurredAt !== 'string' || !isRealCalendarDate(input.occurredAt)) {
       invalid('occurredAt 必须是合法日期时间', 'occurredAt');
     }
+    changedOccurredAt = input.occurredAt !== current.occurred_at;
     occurredAt = input.occurredAt;
   }
 
@@ -163,9 +171,13 @@ export function patchTransaction(
     const assignments: string[] = [];
     const values: Array<string | number | null> = [];
 
-    if (input.categoryId !== undefined) {
-      assignments.push('category_id = ?', 'direction = ?', "direction_source = 'category'", "category_source = 'manual'");
-      values.push(categoryId, direction);
+    if (changedCategory) {
+      assignments.push('category_id = ?', "category_source = 'manual'");
+      values.push(categoryId);
+      if (direction !== current.direction) {
+        assignments.push('direction = ?', "direction_source = 'category'");
+        values.push(direction);
+      }
     }
     if (input.amountCents !== undefined) {
       assignments.push('amount_cents = ?');
@@ -175,7 +187,7 @@ export function patchTransaction(
       assignments.push('merchant = ?');
       values.push(merchant);
     }
-    if (input.occurredAt !== undefined) {
+    if (changedOccurredAt) {
       assignments.push('occurred_at = ?', 'occurred_date = ?', "time_source = 'explicit'", 'chat_at = NULL');
       values.push(occurredAt, toShanghaiDate(occurredAt));
     }

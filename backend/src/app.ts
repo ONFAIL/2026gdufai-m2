@@ -52,6 +52,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
       return;
     }
+    const statusCode =
+      typeof (error as { statusCode?: unknown }).statusCode === 'number'
+        ? (error as { statusCode: number }).statusCode
+        : 500;
+    if (statusCode < 500) {
+      // Fastify 自身的 4xx（如 JSON 解析失败）不能把内部错误码泄漏给客户端。
+      const code =
+        statusCode === 401 ? 'UNAUTHORIZED' : statusCode === 422 ? 'INVALID_QUERY_PARAM' : 'INVALID_BATCH';
+      void reply.status(statusCode).send({
+        error: { code, message: '请求格式不正确' }
+      });
+      return;
+    }
     request.log.error({ err: error }, 'unhandled error');
     void reply.status(500).send({
       error: { code: 'INTERNAL_ERROR', message: '服务器内部错误' }

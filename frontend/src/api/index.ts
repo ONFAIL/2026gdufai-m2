@@ -9,6 +9,7 @@ import type {
   TransactionQuery,
 } from '../types/contract';
 import { createApiError, isMockEnabled, request } from './request';
+import { nowIso } from '../utils/datetime';
 import { mockGetBudgets, mockGetCategories, mockListTransactions } from '../mock/db';
 import { mockGetStats } from '../mock/stats';
 import { mockImportBatch } from '../mock/import';
@@ -37,9 +38,14 @@ export async function getStats(query: StatsQuery): Promise<StatsResponse> {
     params.set('direction', query.direction);
   }
   if (query.dimension !== 'recent7') {
-    if (query.date) params.set('date', query.date);
-    if (query.month) params.set('month', query.month);
-    if (query.year) params.set('year', query.year);
+    const today = nowIso().slice(0, 10);
+    if (query.dimension === 'day') {
+      params.set('date', query.date ?? today);
+    } else if (query.dimension === 'month') {
+      params.set('month', query.month ?? today.slice(0, 7));
+    } else if (query.dimension === 'year') {
+      params.set('year', query.year ?? today.slice(0, 4));
+    }
   }
   return request<StatsResponse>(`/api/stats?${params.toString()}`);
 }
