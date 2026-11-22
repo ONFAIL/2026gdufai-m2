@@ -486,6 +486,23 @@ ejected；
 - **验证**：`typecheck` / `lint` / `test` 全绿，backend 15 文件 **102 例**
 - **人工审核**：待复审
 - **遗留问题**：PR 描述 diff 数字需按实际更新；#18 需补 v1.4 清单；#21 需勾选受影响方
+### LOG-Z_Wen-20261119-08
+
+- **时间**：2026-11-19 21:00（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-transaction-edit` / 待建
+- **任务**：实现契约 §2.9 账单纠错（PATCH / void）
+- **关键提示词**：用户要求 B+C 并行：C 先做账单纠错
+- **代理做了什么**：
+  - 新增 `transaction-edit.ts`：修改金额/类别/商户/时间、写学习规则、软作废
+  - `routes.ts` 注册 PATCH / void 两个路由
+  - 新增错误码 `TRANSACTION_NOT_FOUND` 并登记契约 §2.6
+  - 规则：作废账单不可改；金额正整数；类别不存在 404；改类别翻转 direction；void 幂等
+  - 新增 `transaction-edit.test.ts` 10 例
+- **决策**：`void` 用 `status='void'` 软删除，统计与预算靠 `status='confirmed'` 排除
+- **验证**：`typecheck` / `lint` / `test` 全绿，backend 16 文件 **92 例**
+- **人工审核**：待开 PR
+- **遗留问题**：等 #17 合并后开 PR；契约新增 `TRANSACTION_NOT_FOUND` 需在 issue 登记
 
 ### LOG-Z_Wen-20261119-09
 
@@ -587,6 +604,24 @@ ejected；
 - **人工审核**：待新 PR 复审
 - **遗留问题**：等 #27 合并后把自定义 ID 断言改为 14
 
+### LOG-Z_Wen-20261120-05
+
+- **时间**：2026-11-20 14:45（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-transaction-edit` / #26
+- **任务**：按 #26 Review 收口中性记录与字段重置
+- **关键提示词**：reviewer 指出中性退款/还款可被 PATCH/void、无条件重置 time_source、金额缺安全整数上界
+- **代理做了什么**：
+  - `findTransaction` 读取 `entry_type`；PATCH / void 对 `entry_type != 'normal'` 返回 422（`field: entryType`）
+  - UPDATE 改为按传入字段动态拼 SET：只改金额/商户不再重置 `time_source` / `chat_at` / `direction_source`
+  - 改类别时 `category_source='manual'`
+  - `amountCents` 改用 `Number.isSafeInteger`
+  - 新增 4 个测试：中性记录拒改/拒作废、只改金额保留 chat_time、1e20 拒绝、category_source manual
+- **决策**：中性记录的撤销留给 PR-C 的专门接口；本 PR 只做「禁止直接编辑」
+- **验证**：backend 23 文件 **199 例**通过，lint / diff check 通过
+- **人工审核**：待新 PR 复审
+- **遗留问题**：`TRANSACTION_NOT_FOUND` 的 contract-change issue 需补；void 重算 `settled_at` / `#interest` 在 PR-C
+
 ### LOG-Z_Wen-20261122-01
 
 - **时间**：2026-11-22 16:45（+08:00）
@@ -603,3 +638,19 @@ ejected；
 - **验证**：backend `typecheck` / `lint` 通过；`test` 23 文件 **193 例**通过（迁移 8 例）；`git diff --check` 无输出
 - **人工审核**：待 #32 复审
 - **遗留问题**：#33 rebase 时需同步 §2.9 与 PATCH 顺序并补测试；#31 等 #32 合并后改测试标题/PR 描述并补 P3 用例
+
+### LOG-Z_Wen-20261122-02
+
+- **时间**：2026-11-22 16:45（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-transaction-edit` / #33
+- **任务**：先补 #33 的 P3 校验顺序与回归用例，暂不 rebase
+- **关键提示词**：用户问「#33要不要先补完」；结论是代码级 P3 可以先补，等 #32 合并后再统一 rebase
+- **代理做了什么**：
+  - `patchTransaction` 改为先判 `entry_type`、再判 `status`，中性且已作废的 PATCH 返回 `field: entryType`
+  - 新增用例「中性且已作废的记录 PATCH 仍优先返回 entryType」
+  - 未改契约 §2.9，未 rebase，未处理 `routes.ts` 冲突
+- **决策**：只补与分支基线无关的代码顺序和测试；契约同步、`routes.ts` 冲突留到 #32 合并后的 rebase，避免重复解决冲突
+- **验证**：backend `typecheck` / `lint` 通过；`test` 23 文件 **205 例**通过（transaction-edit 20 例）
+- **人工审核**：待 #33 复审
+- **遗留问题**：#32 合并后 rebase #33，同步 §2.9 过渡口径，修正 #34 章节与 PR 描述，再补契约相关测试

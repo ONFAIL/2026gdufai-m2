@@ -7,6 +7,11 @@ import { listTransactions, type TransactionListQuery } from './transactions.ts';
 import { listCategoryItems } from './repository.ts';
 import { parseBatch } from './validation.ts';
 import {
+  patchTransaction,
+  voidTransactionById,
+  type PatchTransactionInput
+} from './transaction-edit.ts';
+import {
   createCategory,
   deleteCategory,
   reassignCategory,
@@ -147,6 +152,22 @@ export async function registerLedgerRoutes(app: FastifyInstance): Promise<void> 
       invalid('limit 必须是整数');
     }
     return reply.send(listTransactions(app.db, app.config.demoUserId, listQuery));
+  });
+
+  app.patch('/api/transactions/:id', async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const result = patchTransaction(
+      app.db,
+      id,
+      app.config.demoUserId,
+      (request.body ?? {}) as PatchTransactionInput
+    );
+    return reply.send(result);
+  });
+
+  app.post('/api/transactions/:id/void', async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    return reply.send(voidTransactionById(app.db, id, app.config.demoUserId));
   });
 
   app.post('/api/categories', async (request, reply) => {
