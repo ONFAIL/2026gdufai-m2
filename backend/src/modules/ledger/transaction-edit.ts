@@ -101,11 +101,11 @@ export function patchTransaction(
   if (current === null) {
     throw transactionNotFound(id);
   }
-  if (current.status !== 'confirmed') {
-    invalid('已作废的账单不可修改', 'status');
-  }
   if (current.entry_type !== 'normal') {
     invalid('中性记录不允许直接修改', 'entryType');
+  }
+  if (current.status !== 'confirmed') {
+    invalid('已作废的账单不可修改', 'status');
   }
 
   let categoryId = current.category_id;

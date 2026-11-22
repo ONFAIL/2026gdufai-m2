@@ -510,3 +510,19 @@ ejected；
 - **验证**：backend 23 文件 **199 例**通过，lint / diff check 通过
 - **人工审核**：待新 PR 复审
 - **遗留问题**：`TRANSACTION_NOT_FOUND` 的 contract-change issue 需补；void 重算 `settled_at` / `#interest` 在 PR-C
+
+### LOG-Z_Wen-20261122-02
+
+- **时间**：2026-11-22 16:45（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M2 / `feat/m2-transaction-edit` / #33
+- **任务**：先补 #33 的 P3 校验顺序与回归用例，暂不 rebase
+- **关键提示词**：用户问「#33要不要先补完」；结论是代码级 P3 可以先补，等 #32 合并后再统一 rebase
+- **代理做了什么**：
+  - `patchTransaction` 改为先判 `entry_type`、再判 `status`，中性且已作废的 PATCH 返回 `field: entryType`
+  - 新增用例「中性且已作废的记录 PATCH 仍优先返回 entryType」
+  - 未改契约 §2.9，未 rebase，未处理 `routes.ts` 冲突
+- **决策**：只补与分支基线无关的代码顺序和测试；契约同步、`routes.ts` 冲突留到 #32 合并后的 rebase，避免重复解决冲突
+- **验证**：backend `typecheck` / `lint` 通过；`test` 23 文件 **205 例**通过（transaction-edit 20 例）
+- **人工审核**：待 #33 复审
+- **遗留问题**：#32 合并后 rebase #33，同步 §2.9 过渡口径，修正 #34 章节与 PR 描述，再补契约相关测试

@@ -129,6 +129,17 @@ describe('PATCH /api/transactions/:id', () => {
     });
   });
 
+  it('中性且已作废的记录 PATCH 仍优先返回 entryType', async () => {
+    const id = insertTransaction(1, 'void');
+    db.prepare("UPDATE transactions SET entry_type = 'repayment' WHERE id = ?").run(id);
+
+    const result = await patch(id, { amountCents: 100 });
+    expect(result.status).toBe(422);
+    expect(result.body).toMatchObject({
+      error: { code: 'INVALID_QUERY_PARAM', field: 'entryType' }
+    });
+  });
+
   it('只改金额不丢失 time_source / chat_at', async () => {
     const id = insertTransaction();
     db.prepare(
