@@ -93,3 +93,24 @@
 - **人工审核**：待审核
 - **遗留问题**：M1 尚无回传 `originalTransactionId` 的通道；前端类别 CRUD 与账单 PATCH/void 无 UI；#35 仍为 Draft（等 #24 冻结、音频魔数、反馈码对齐）；中性还款作废与利息撤销留给 PR-C
 
+### LOG-Tarnishedtaffy-20261123-01
+
+- **时间**：2026-11-23 18:32（+08:00）
+- **工具/模型**：Trae / DeepSeek-V4.1-Flash
+- **模块 / 分支 / PR**：M4 + 前端 / `fix/m4-budget-review` / 待建
+- **任务**：复审 PR #51（M4 预算读写），修复发现的 bug 与不足，并补前端测试
+- **关键提示词**：「检查一下新的pr」「再检查一遍 如果有bug或者不足的地方就给review」「把现在几个issue修一下」「直接推送」「创建 PR 合并到 main」
+- **代理做了什么**：
+  - `frontend/src/views/BudgetView.vue`：切换月份时清空编辑态与删除确认，避免把旧预算保存到新月份；删除改为二次确认并在请求期间禁用按钮
+  - `frontend/src/components/BudgetForm.vue`：编辑态禁用类型/类别选择，避免 PUT 幂等键变化后新建预算；补控件 `id` 供测试定位
+  - `frontend/app-budget.test.ts`：新增 3 例（切月清编辑态回归、金额/阈值校验与按分提交、mock 预算幂等覆盖与删除）
+  - `frontend/test-support/app-renderer.ts`：测试节点补 `getRootNode()`，让 `v-model` 更新可在自研 renderer 下测试
+  - `backend/src/modules/budget/service.ts`：`scope=total` 时严格拒绝非 `null` 的 `categoryId`
+  - `backend/src/modules/budget/repository.ts`：移除未使用的 `is_active` 查询字段
+  - `docs/GLOSSARY.md`：新增术语行「告警阈值 / `alertThresholds`」
+  - `docs/contracts/module2-interface-v1.md` §2.8：告警触发文案改为「M2 接入（#38）后由 recalc 函数触发」，与当前实现一致
+- **决策**：在 #51 最新 head 上追加修复并单独向 `main` 提 PR，合并后由作者关闭 #51，避免重复评审；契约只改文案、不增删字段，仍在 #50 契约变更范围内；共享测试基建改动需在 PR 中 @ 前端框架负责人
+- **验证**：`pnpm -r typecheck` / `lint` / `test` 与 `frontend build` 全绿；backend 340 项、frontend 78 项；`git diff --check` 无输出
+- **人工审核**：待审核
+- **遗留问题**：合并后需关闭 #51；M2 写路径接入预算告警仍在 #38；PR #48 的测试交叉场景与空行问题未处理
+

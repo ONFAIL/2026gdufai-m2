@@ -336,10 +336,15 @@
 
 ```jsonc
 [ { "id": 1, "scope": "total", "category": null, "amountCents": 300000,
-    "spentCents": 268400, "remainingCents": 31600, "usageRatio": 0.895, "level": "near" } ]
+    "spentCents": 268400, "remainingCents": 31600, "usageRatio": 0.895, "level": "near",
+    "alertThresholds": [80, 100] } ]
 ```
 
-`level`：`normal` / `near`（≥80%）/ `over`（≥100%）。
+- `level`：`normal` / `near`（≥80%）/ `over`（≥100%）；
+- `category` 统一为 `{ "id": 1, "name": "餐饮" }` 或 `null`；`scope=total` 时必为 `null`，且不返回 `kind`/`color`/`icon`；
+- `spentCents` 只统计 `direction='expense'`、`entry_type='normal'`、`status='confirmed'` 的账单，按 `occurred_date` 的 `Asia/Shanghai` 自然月聚合；
+- `remainingCents = amountCents - spentCents`，允许为负；
+- `alertThresholds` 为该预算已保存的阈值，去重升序；空数组表示关闭该预算的提醒；该字段随 `GET`/`PUT` 返回，便于前端回显。
 
 ### 2.6 错误格式
 
@@ -439,7 +444,7 @@ PUT /api/budgets
   "amountCents": 100000, "alertThresholds": [80, 100] }
 → 200 { "id": 7, "scope": "category", "category": { "id": 1, "name": "餐饮" },
         "amountCents": 100000, "spentCents": 98000, "remainingCents": 2000,
-        "usageRatio": 0.98, "level": "near" }
+        "usageRatio": 0.98, "level": "near", "alertThresholds": [80, 100] }
 
 DELETE /api/budgets/7
 → 204
@@ -447,11 +452,15 @@ DELETE /api/budgets/7
 
 规则：
 
+- `GET` / `PUT` 的响应顶层都包含上例全部字段，`id` 供 `DELETE` 使用；
 - `scope=total` 时 `categoryId` 必须为 `null`；`scope=category` 必须提供 `categoryId`，否则 `422 INVALID_QUERY_PARAM`；
+- `scope=category` 时目标类别必须存在且 `kind='expense'`；不存在返回 `404 CATEGORY_NOT_FOUND`，收入类别返回 `422 INVALID_QUERY_PARAM`（`field: categoryId`）；
 - `amountCents` 必须是**正整数**（单位分，且 > 0），非法返回 `422 INVALID_QUERY_PARAM`（`field: amountCents`）；
-- `alertThresholds` 为 **1–200 的整数数组**，去重后升序存储，最多 5 个，缺省 `[80, 100]`；越界、非整数或超过 5 个返回 `422 INVALID_QUERY_PARAM`（`field: alertThresholds`）。该范围与 `budget_alerts.threshold` 的 `CHECK (BETWEEN 1 AND 200)` 保持一致；
+- `alertThresholds` 为 **1–200 的整数数组**，去重后升序存储，最多 5 个，缺省 `[80, 100]`；**空数组表示关闭该预算的提醒**（不写入任何告警）；越界、非整数或超过 5 个返回 `422 INVALID_QUERY_PARAM`（`field: alertThresholds`）。该范围与 `budget_alerts.threshold` 的 `CHECK (BETWEEN 1 AND 200)` 保持一致；
 - 同一 `(month, scope, categoryId)` 幂等覆盖，不产生重复预算，响应始终包含预算 `id`，供 `DELETE /api/budgets/:id` 使用；
-- 删除不存在的预算返回 `404 BUDGET_NOT_FOUND`；删除成功返回 `204` 无响应体。
+- 删除不存在的预算返回 `404 BUDGET_NOT_FOUND`；删除成功返回 `204` 无响应体；
+- 预算读写接口不使用 `409`；`BUDGET_CONFLICT` 只用于类别迁移（§2.7）的目标同月预算冲突；
+- 本期不提供告警查询端点；告警由 `PUT /api/budgets` 触发；M2 账单写操作接入（#38）后，由 `recalcBudgetForTransaction` / `recalcBudgetsForMonth` 在账单写入/变更后触发，写入 `budget_alerts` 供后续通知模块消费。
 
 ## 2.9 账单纠错
 
