@@ -94,6 +94,24 @@ describe('预算阈值告警', () => {
     expect(listBudgetAlerts(db, id)).toEqual([{ threshold: 80, spent_cents: 8000 }]);
   });
 
+  it('空阈值表示关闭提醒，不写任何告警', async () => {
+    insertTransaction({ amountCents: 12000 });
+    const created = await putBudget({
+      month: '2026-11',
+      scope: 'total',
+      categoryId: null,
+      amountCents: 10000,
+      alertThresholds: []
+    });
+    const id = budgetId(created);
+    expect(created.status).toBe(200);
+    expect(created.body.alertThresholds).toEqual([]);
+    expect(listBudgetAlerts(db, id)).toEqual([]);
+
+    recalcBudgetForTransaction(db, 'u_001', '2026-11-16', 1);
+    expect(listBudgetAlerts(db, id)).toEqual([]);
+  });
+
   it('创建预算时已超阈值会立即写入告警', async () => {
     insertTransaction({ amountCents: 12000 });
     const created = await putBudget({

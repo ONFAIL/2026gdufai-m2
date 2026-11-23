@@ -672,3 +672,20 @@ ejected；
 - **验证**：`pnpm -r typecheck` 全绿；`pnpm -r test` backend 33 文件 339 例、frontend 13 文件 75 例全通过；`pnpm lint` 通过；`git diff --check` 无输出
 - **人工审核**：待 PR #49 复审
 - **遗留问题**：`frontend/src/types/contract.ts` 257 行（按测试统计）仍超 200 行技术债；#38 待 #36/#37/#39/#42 关闭后接入 `recalcBudgetForTransaction`；M4 前端仅改授权三路径
+
+### LOG-Z_Wen-20261123-02
+
+- **时间**：2026-11-23 17:30（+08:00）
+- **工具/模型**：DeepSeek Harness / deepseek-flash
+- **模块 / 分支 / PR**：M4 / `feat/m4-budgets` / #51
+- **任务**：按 reviewer 第二次回复 `REPLY_Z_Wen_20261123_02.md` 处理 P1（空阈值契约口径）与 P2（日志/PR 描述文件范围）
+- **关键提示词**：P1 空数组二选一；P2 日志与 PR 描述列全实际改动文件
+- **代理做了什么**：
+  - 契约 §2.5 / §2.8 明确「空数组表示关闭该预算的提醒」
+  - `backend/test/m4/alerts.test.ts` 增加「空阈值不写告警」用例
+  - 追加本条日志，更正 `LOG-Z_Wen-20261123-01` 中「前端仅改授权三路径」的不准确表述
+  - 更新 PR #51 描述，列全前端实际改动并写明阶段限制
+- **决策**：采纳 P1 方案 A，允许空数组，语义为关闭提醒；前端实际还改 `frontend/src/components/BudgetForm.vue`、`frontend/src/types/contract.ts`、`frontend/bugtest.test.ts`，均属预算功能必要改动
+- **验证**：backend `typecheck` / `lint` 通过；`pnpm -r test` backend 33 文件 **340 例**、frontend 13 文件 75 例全通过；PR #51 CI 以 GitHub 为准
+- **人工审核**：待 Tarnishedtaffy 复审
+- **遗留问题**：#50 在 #51 合并后关闭；#38 等 #36/#37/#39/#42 关闭后单独开 `fix/m2-budget-recalc`
