@@ -93,7 +93,7 @@
 - **人工审核**：待审核
 - **遗留问题**：M1 尚无回传 `originalTransactionId` 的通道；前端类别 CRUD 与账单 PATCH/void 无 UI；#35 仍为 Draft（等 #24 冻结、音频魔数、反馈码对齐）；中性还款作废与利息撤销留给 PR-C
 
-### LOG-Tarnishedtaffy-20261123-01
+### LOG-Tarnishedtaffy-20261123-02
 
 - **时间**：2026-11-23 21:05（+08:00）
 - **工具/模型**：Trae / DeepSeek-V4.1-Flash
