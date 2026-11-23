@@ -114,3 +114,22 @@
 - **人工审核**：待审核
 - **遗留问题**：合并后需关闭 #51；M2 写路径接入预算告警仍在 #38；PR #48 的测试交叉场景与空行问题未处理
 
+### LOG-Tarnishedtaffy-20261123-02
+
+- **时间**：2026-11-23 21:05（+08:00）
+- **工具/模型**：Trae / DeepSeek-V4.1-Flash
+- **模块 / 分支 / PR**：M2 + docs / `fix/m2-open-issues` / #53
+- **任务**：清理仓库开放 issue 中可在本人模块内直接修复的项
+- **关键提示词**：「把上面能修的issue都修复了吧 先做一下难度分析 如果太难的issue就交给Gemini和glm修复 其他简单的交给你修」
+- **代理做了什么**：
+  - #36 `backend/src/modules/ledger/transaction-edit.ts`：类别实际变化时同时把 `category_confidence` 置 `NULL`；补「同类别不改来源/置信度」「改类别清空置信度」「跨 kind 置 direction_source=category」断言
+  - #37 `backend/src/modules/ledger/categories.ts`：`reassignCategory` 增加预设源 `403 CATEGORY_PRESET_PROTECTED`；把目标校验、kind/预算冲突校验与三类更新收进同一个 `db.transaction`；补预设源用例
+  - #39 `docs/contracts/module2-interface-v1.md`：reassign 示例 13→14、`TRANSACTION_NOT_FOUND` 补 `field: id`；`packages/capture-flow/src/feedback.ts` 给 `REPAYMENT_EXCESS_AS_EXPENSE` 补 deprecated 注释
+  - #42 `docs/contracts/module2-interface-v1.md`：v1.5 变更记录写明迁移会把任意 id 的同名自定义「贷款利息」重命名为「贷款利息(旧N)」并迁移引用
+  - #20 `backend/test/m2/validation.test.ts`：补 `1e20`、安全整数分边界、Infinity/NaN、多位小数用例（`isAmount` 已在 `feat/m2-v1.5-repayment-refund` 修复）
+  - 契约 §2.7 规则同步「预设类别不能作为 reassign 源」，错误表文案同步删除或迁移
+- **决策**：#38（所有 M2 写路径接入预算告警重算）与 #18（前端 v1.4/v1.5 全量同步）范围大、跨模块，留给 Gemini/GLM；#40/#41 属于 M1 的 #35 分支，不代改；#19 中性记录唯一冲突自愈涉及退款/还款多调用点，列为中等，暂不处理
+- **验证**：`node .../pnpm.cjs -r typecheck/lint/test` 全绿；backend 312 项（新增 6 项）、frontend 75 项
+- **人工审核**：待审核
+- **遗留问题**：#38、#18、#19 待分配；#40/#41 由 M1 负责人在 #35 处理
+
