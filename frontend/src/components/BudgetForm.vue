@@ -40,10 +40,11 @@ function parseThresholds(raw: string): number[] | null {
     .map((part) => part.trim())
     .filter((part) => part !== '')
     .map((part) => Number(part));
-  if (values.some((value) => !Number.isSafeInteger(value) || value < 1 || value > 200) || values.length > 5) {
+  const unique = [...new Set(values)];
+  if (unique.some((value) => !Number.isSafeInteger(value) || value < 1 || value > 200) || unique.length > 5) {
     return null;
   }
-  return [...new Set(values)].sort((a, b) => a - b);
+  return unique.sort((a, b) => a - b);
 }
 
 async function submit(): Promise<void> {
