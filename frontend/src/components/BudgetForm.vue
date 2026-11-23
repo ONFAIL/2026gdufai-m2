@@ -124,14 +124,14 @@ watch(
     <div class="form-row">
       <label>
         类型
-        <select v-model="formScope">
+        <select id="budget-scope" v-model="formScope" :disabled="editing !== null">
           <option value="total">月度总预算</option>
           <option value="category">类别预算</option>
         </select>
       </label>
       <label v-if="formScope === 'category'">
         类别
-        <select v-model.number="formCategoryId">
+        <select id="budget-category" v-model.number="formCategoryId" :disabled="editing !== null">
           <option v-for="category in expenseCategories" :key="category.id" :value="category.id">
             {{ category.name }}
           </option>
@@ -139,11 +139,11 @@ watch(
       </label>
       <label>
         金额（元）
-        <input v-model="formAmountYuan" type="number" min="0.01" step="0.01" placeholder="1500.00" />
+        <input id="budget-amount" v-model="formAmountYuan" type="number" min="0.01" step="0.01" placeholder="1500.00" />
       </label>
       <label>
         告警阈值（%，留空不提醒）
-        <input v-model="formThresholds" type="text" placeholder="80,100" />
+        <input id="budget-thresholds" v-model="formThresholds" type="text" placeholder="80,100" />
       </label>
       <button type="submit" class="btn btn-primary" :disabled="saving">
         {{ saving ? '保存中…' : editing === null ? '新增预算' : '保存修改' }}

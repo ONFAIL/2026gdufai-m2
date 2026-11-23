@@ -16,12 +16,11 @@ export interface BudgetJoinedRow extends BudgetRow {
   readonly category_name: string | null;
 }
 
-/** 预算可选的类别元数据；kind 与 is_active 用于写入校验。 */
+/** 预算可选的类别元数据；kind 用于写入校验。 */
 export interface BudgetCategoryRow {
   readonly id: number;
   readonly name: string;
   readonly kind: 'expense' | 'income';
-  readonly is_active: number;
 }
 
 /** 读取指定月份的全部预算，total 排在最前。 */
@@ -71,7 +70,7 @@ export function findBudgetById(db: Db, userId: string, id: number): BudgetRow | 
 /** 查询类别是否存在以及 kind，预算只允许支出类别。 */
 export function findBudgetCategory(db: Db, id: number): BudgetCategoryRow | null {
   const row = db
-    .prepare('SELECT id, name, kind, is_active FROM categories WHERE id = ?')
+    .prepare('SELECT id, name, kind FROM categories WHERE id = ?')
     .get(id) as BudgetCategoryRow | undefined;
   return row ?? null;
 }

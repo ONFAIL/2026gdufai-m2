@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { deleteBudget, getBudgets } from '../api/index';
 import { useCategories } from '../composables/useCategories';
 import type { BudgetItem } from '../types/contract';
@@ -17,6 +17,14 @@ const editing = ref<BudgetItem | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const actionError = ref<string | null>(null);
+const pendingDeleteId = ref<number | null>(null);
+const deletingId = ref<number | null>(null);
+
+watch(month, () => {
+  editing.value = null;
+  pendingDeleteId.value = null;
+  actionError.value = null;
+});
 
 async function loadBudgets(): Promise<void> {
   loading.value = true;
@@ -42,6 +50,7 @@ async function onSaved(): Promise<void> {
 
 async function removeBudget(budget: BudgetItem): Promise<void> {
   actionError.value = null;
+  deletingId.value = budget.id;
   try {
     await deleteBudget(budget.id);
     if (editing.value?.id === budget.id) {
@@ -50,6 +59,9 @@ async function removeBudget(budget: BudgetItem): Promise<void> {
     await loadBudgets();
   } catch (err: unknown) {
     actionError.value = err instanceof Error ? err.message : '删除预算失败';
+  } finally {
+    deletingId.value = null;
+    pendingDeleteId.value = null;
   }
 }
 
@@ -102,7 +114,18 @@ onMounted(async () => {
           <span class="thresholds">告警阈值：{{ b.alertThresholds.length > 0 ? b.alertThresholds.join(' / ') + '%' : '未设置' }}</span>
           <div class="card-actions">
             <button type="button" class="btn btn-small" @click="startEdit(b)">编辑</button>
-            <button type="button" class="btn btn-small btn-danger" @click="removeBudget(b)">删除</button>
+            <template v-if="pendingDeleteId === b.id">
+              <button
+                type="button"
+                class="btn btn-small btn-danger"
+                :disabled="deletingId === b.id"
+                @click="removeBudget(b)"
+              >
+                {{ deletingId === b.id ? '删除中…' : '确认删除' }}
+              </button>
+              <button type="button" class="btn btn-small" :disabled="deletingId === b.id" @click="pendingDeleteId = null">取消</button>
+            </template>
+            <button v-else type="button" class="btn btn-small btn-danger" @click="pendingDeleteId = b.id">删除</button>
           </div>
         </div>
       </article>

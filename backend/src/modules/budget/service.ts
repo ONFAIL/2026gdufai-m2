@@ -119,7 +119,7 @@ function parseBudgetInput(body: unknown): BudgetInput {
 
   let categoryId: number | null = null;
   if (scope === 'total') {
-    if (input.categoryId !== undefined && input.categoryId !== null) {
+    if (input.categoryId !== null) {
       invalid('scope=total 时 categoryId 必须为 null', 'categoryId');
     }
   } else {

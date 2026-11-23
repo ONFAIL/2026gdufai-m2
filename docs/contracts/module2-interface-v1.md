@@ -460,7 +460,7 @@ DELETE /api/budgets/7
 - 同一 `(month, scope, categoryId)` 幂等覆盖，不产生重复预算，响应始终包含预算 `id`，供 `DELETE /api/budgets/:id` 使用；
 - 删除不存在的预算返回 `404 BUDGET_NOT_FOUND`；删除成功返回 `204` 无响应体；
 - 预算读写接口不使用 `409`；`BUDGET_CONFLICT` 只用于类别迁移（§2.7）的目标同月预算冲突；
-- 本期不提供告警查询端点；告警由 `PUT` 与 M2 账单写操作触发，写入 `budget_alerts` 供后续通知模块消费。
+- 本期不提供告警查询端点；告警由 `PUT /api/budgets` 触发；M2 账单写操作接入（#38）后，由 `recalcBudgetForTransaction` / `recalcBudgetsForMonth` 在账单写入/变更后触发，写入 `budget_alerts` 供后续通知模块消费。
 
 ## 2.9 账单纠错
 
