@@ -142,6 +142,41 @@ describe('#38 预算告警重算', () => {
     expect(budgets.body[0]).toMatchObject({ spentCents: 10500, level: 'over' });
   });
 
+  it('导入还款与利息后只把利息计入支出预算', async () => {
+    const budget = await putBudget(totalBudget({ amountCents: 1000, alertThresholds: [80, 100] }));
+    const loan = await sendImport([
+      record({
+        idempotencyKey: `recalc_loan_${++sequence}`,
+        rawText: '贷款 1000 到账',
+        amount: 1000,
+        merchant: '某银行'
+      })
+    ]);
+    const loanId = loan.body.results[0].transactionId as string;
+
+    const repayment = await sendImport([
+      record({
+        idempotencyKey: `recalc_repayment_${++sequence}`,
+        rawText: '还款 1100',
+        amount: 1100,
+        merchant: '某银行',
+        originalTransactionId: loanId,
+        repaymentPart: 'mixed',
+        principalCents: 100000,
+        interestCents: 10000
+      })
+    ]);
+    expect(repayment.status).toBe(201);
+    expect(repayment.body.results[0].interestTransactionId).toMatch(/^tx_/);
+    expect(listBudgetAlerts(db, budget.body.id as number)).toEqual([
+      { threshold: 80, spent_cents: 10000 },
+      { threshold: 100, spent_cents: 10000 }
+    ]);
+
+    const budgets = await getBudgets();
+    expect(budgets.body[0]).toMatchObject({ spentCents: 10000, level: 'over' });
+  });
+
   it('PATCH 金额后重算预算告警', async () => {
     const created = await putBudget(totalBudget({ alertThresholds: [80] }));
     const imported = await sendImport([record({ amount: 50 })]);
