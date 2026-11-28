@@ -91,17 +91,20 @@ export async function registerLedgerRoutes(app: FastifyInstance): Promise<void> 
         `records[${mismatchIndex}].userId`
       );
     }
-    const result = processBatch(app.db, parsed.batch);
-    // 一条批次可能同时产生普通账单、退款/还款和利息记录；按整月重算全部预算，
-    // 避免只按 RecordResult 的类别漏掉中性记录或利息记录触发的告警。
-    const months = new Set(
-      result.results
-        .filter((item) => item.status === 'confirmed' && item.occurredAt !== null)
-        .map((item) => toShanghaiDate(item.occurredAt as string).slice(0, 7))
-    );
-    for (const month of months) {
-      recalcBudgetsForMonthAll(app.db, app.config.demoUserId, month);
-    }
+    const result = app.db.transaction(() => {
+      const imported = processBatch(app.db, parsed.batch);
+      // 一条批次可能同时产生普通账单、退款/还款和利息记录；按整月重算全部预算，
+      // 避免只按 RecordResult 的类别漏掉中性记录或利息记录触发的告警。
+      const months = new Set(
+        imported.results
+          .filter((item) => item.status === 'confirmed' && item.occurredAt !== null)
+          .map((item) => toShanghaiDate(item.occurredAt as string).slice(0, 7))
+      );
+      for (const month of months) {
+        recalcBudgetsForMonthAll(app.db, app.config.demoUserId, month);
+      }
+      return imported;
+    })();
     return reply.status(201).send(result);
   });
 
@@ -205,9 +208,11 @@ export async function registerLedgerRoutes(app: FastifyInstance): Promise<void> 
     if (!Number.isInteger(target) || (target as number) <= 0) {
       invalid('targetCategoryId 必须是正整数');
     }
-    const result = reassignCategory(app.db, id, target as number);
-    // 类别迁移会改动目标类别在各月的支出，事务提交后按目标类别重算告警。
-    recalcBudgetsForCategory(app.db, app.config.demoUserId, target as number);
+    const result = app.db.transaction(() => {
+      const moved = reassignCategory(app.db, id, target as number);
+      recalcBudgetsForCategory(app.db, app.config.demoUserId, target as number);
+      return moved;
+    })();
     return reply.send(result);
   });
 }

@@ -301,3 +301,34 @@ describe('#38 预算告警重算', () => {
     expect(moved.category_id).toBe(target.id);
   });
 });
+
+function failAlertInsert(): void {
+  db.exec("CREATE TEMP TRIGGER fail_alert BEFORE INSERT ON budget_alerts BEGIN SELECT RAISE(ABORT, 'test alert failure'); END");
+}
+
+it('重算失败时回滚导入，同一记录可重试', async () => {
+  const budget = await putBudget(totalBudget({ amountCents: 1000 }));
+  const rows = [record({ amount: 9 })];
+  failAlertInsert();
+  try {
+    expect((await sendImport(rows)).status).toBe(500);
+    expect(db.prepare('SELECT count(*) AS n FROM transactions').get()).toEqual({ n: 0 });
+  } finally { db.exec('DROP TRIGGER fail_alert'); }
+  expect((await sendImport(rows)).body.results[0].status).toBe('confirmed');
+  expect(listBudgetAlerts(db, budget.body.id)).toHaveLength(1);
+});
+
+it('预算重算失败回滚类别迁移，重试后更新预算', async () => {
+  const source = await createCategory('回滚源类别');
+  const target = await createCategory('回滚目标类别');
+  const id = insertTransaction({ amountCents: 900, categoryId: source.id });
+  const budget = await putBudget({ month: '2026-11', scope: 'category', categoryId: target.id, amountCents: 1000, alertThresholds: [80] });
+  const move = () => app.inject({ method: 'POST', url: '/api/categories/' + source.id + '/reassign', payload: { targetCategoryId: target.id } });
+  failAlertInsert();
+  try {
+    expect((await move()).statusCode).toBe(500);
+    expect(db.prepare('SELECT category_id FROM transactions WHERE id=?').get(id)).toEqual({ category_id: source.id });
+  } finally { db.exec('DROP TRIGGER fail_alert'); }
+  expect((await move()).statusCode).toBe(200);
+  expect(listBudgetAlerts(db, budget.body.id)).toHaveLength(1);
+});
